@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Propagator Tests</title>
+  <style>
+    body { font: 14px/1.5 ui-monospace, Menlo, monospace; margin: 24px 16px; background: #fff; color: #111; }
+    .ok { color: #1a7f37; } .bad { color: #c9372c; } h1 { font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h1 id="sum">Running…</h1>
+  <div id="out"></div>
+  <script src="vendor/math.js"></script>
+  <script src="src/propagate.js"></script>
+  <script src="tests/tests.js"></script>
+  <script>
+    const results = runTests();
+    const failed = results.filter((r) => !r.ok).length;
+    document.getElementById('sum').textContent = (results.length - failed) + '/' + results.length + ' passed';
+    document.getElementById('sum').className = failed ? 'bad' : 'ok';
+    const out = document.getElementById('out');
+    results.forEach((r) => {
+      const d = document.createElement('div');
+      d.className = r.ok ? 'ok' : 'bad';
+      d.textContent = (r.ok ? '✓ ' : '✗ ') + r.name + (r.ok ? '' : ' — ' + r.msg);
+      out.append(d);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Error Propagator</title>
+  <link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Error Propagator</h1>
+      <p class="tagline">Type an equation, enter your measurements, get the result ± uncertainty.</p>
+    </header>
+
+    <section class="card">
+      <label for="eq" class="label">Equation</label>
+      <div class="eq-row">
+        <input id="eq" class="mono" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="g = 4*pi^2*L/T^2">
+        <button id="example" class="ghost" type="button">Example</button>
+      </div>
+      <details class="help">
+        <summary>What can I type?</summary>
+        <ul>
+          <li><code>+ - * / ^</code> and brackets. Put <code>*</code> between variables: <code>m*v</code>, not <code>mv</code> (that's one variable called mv).</li>
+          <li><code>sqrt(x)</code>, <code>ln(x)</code> or <code>log(x)</code> (natural log), <code>log10(x)</code>, <code>exp(x)</code>, <code>abs(x)</code></li>
+          <li><code>sin cos tan</code>, <code>asin acos atan</code>. Choose degrees or radians below.</li>
+          <li>Constants: <code>pi</code> and <code>e</code>. Any other name is a variable, so <code>E</code>, <code>c</code>, <code>phi</code> are fine.</li>
+          <li>Numbers like <code>6.67e-11</code> or <code>6.67x10^-11</code>. A constant you know exactly can be a variable with uncertainty 0.</li>
+        </ul>
+      </details>
+    </section>
+
+    <section class="card">
+      <div class="label">Measured variables</div>
+      <div id="vars"><p class="empty">Your variables will appear here once you type an equation.</p></div>
+      <div class="options">
+        <div class="opt">
+          <span class="opt-label">Angles</span>
+          <div class="seg" role="group" aria-label="Angle units">
+            <button type="button" data-deg="0">Radians</button>
+            <button type="button" data-deg="1">Degrees</button>
+          </div>
+        </div>
+        <div class="opt">
+          <label class="opt-label" for="round">Round uncertainty to</label>
+          <select id="round">
+            <option value="auto">1 s.f. (2 if it starts with 1)</option>
+            <option value="1">1 s.f.</option>
+            <option value="2">2 s.f.</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="result" aria-live="polite"></section>
+
+    <footer>Uses the partial-derivative method and assumes the measured variables are independent.</footer>
+  </main>
+
+  <script src="vendor/math.js"></script>
+  <script src="src/propagate.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
