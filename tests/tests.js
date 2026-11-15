@@ -344,6 +344,79 @@
     same(EP.withUnit(EP.formatResult(9.79, 0.42, 'auto'), { display: 'm / s^2', tex: 'U' }).text, '(9.8 ± 0.4) m / s^2');
   });
 
+  // ----- Linear fit: must match the lab's LSFR-25.py exactly -----
+  // Reference numbers produced by running LSFR-25.py's own fitting_procedure
+  // and chi_squared_function on these data files (part3.txt, part4.txt).
+  const nearRel = (got, want, label) => {
+    if (!(Math.abs(got - want) <= 1e-9 * Math.abs(want))) throw new Error((label || '') + ' got ' + got + ', expected ' + want);
+  };
+  const P3 = [[204.0816327, 2.69e-3, 3.27e-4], [123.4567901, 2.45e-3, 0.0003245], [82.6446281, 1.94e-3, 0.0003194],
+    [69.44444444, 1.51e-3, 0.0003151], [59.17159763, 1.40e-3, 0.000314], [51.02040816, 1.10e-3, 0.000311],
+    [44.44444444, 1.03e-3, 0.0003103], [34.60207612, 9.70e-4, 0.0003097], [27.70083102, 8.40e-4, 0.0003084],
+    [22.67573696, 5.70e-4, 0.0003057]];
+  const P4 = [[7.50e-5, -6.571283042, 0.022428571], [1.50e-4, -7.002065958, 0.033967033], [2.25e-4, -7.143477613, 0.038974684],
+    [3.00e-4, -7.338538195, 0.047153846], [3.75e-4, -7.701828378, 0.067371681]];
+  const col = (d, k) => d.map((r) => r[k]);
+  test('fit: matches LSFR on part3.txt', () => {
+    const f = EP.linearFit(col(P3, 0), col(P3, 1), col(P3, 2));
+    nearRel(f.m, 1.2112874988678087e-05, 'm'); nearRel(f.c, 0.0005756260767552172, 'c');
+    nearRel(f.sm, 1.9448726150644534e-06, 'sm'); nearRel(f.sc, 0.00016837926642909338, 'sc');
+    nearRel(f.chi2, 5.123042740527304, 'chi2'); same(f.dof, 8); nearRel(f.chi2red, 0.640380342565913, 'chi2red');
+  });
+  test('fit: matches LSFR on part4.txt', () => {
+    const f = EP.linearFit(col(P4, 0), col(P4, 1), col(P4, 2));
+    nearRel(f.m, -3616.0861641362235, 'm'); nearRel(f.c, -6.335251275556468, 'c');
+    nearRel(f.sm, 166.46773037260698, 'sm'); nearRel(f.sc, 0.029957536688149773, 'sc');
+    nearRel(f.chi2, 18.90674127668198, 'chi2'); same(f.dof, 3); nearRel(f.chi2red, 6.302247092227327, 'chi2red');
+  });
+  test('fit: residuals', () => {
+    const f = EP.linearFit([1, 2, 3], [2, 4, 7], [1, 1, 1]);
+    near(f.m, 2.5); near(f.c, -2 / 3);
+    near(f.residuals[0], 2 - (2.5 - 2 / 3)); near(f.chi2, f.residuals.reduce((a, r) => a + r * r, 0));
+  });
+  test('fit: through origin', () => {
+    const f = EP.linearFit([1, 2, 3], [2.1, 3.9, 6.2], [0.1, 0.2, 0.1], { origin: true });
+    const w = [100, 25, 100];
+    near(f.m, (w[0] * 2.1 + w[1] * 2 * 3.9 + w[2] * 3 * 6.2) / (w[0] + w[1] * 4 + w[2] * 9));
+    near(f.sm, 1 / Math.sqrt(w[0] + w[1] * 4 + w[2] * 9)); same(f.c, 0); same(f.dof, 2);
+  });
+  test('fit: x errors (effective variance) on exact line', () => {
+    const x = [1, 2, 3, 4], y = [3, 5, 7, 9], sy = [0.1, 0.1, 0.2, 0.2], sx = [0.05, 0.05, 0.05, 0.05];
+    const f = EP.linearFit(x, y, sy, { sx, useXErrors: true });
+    near(f.m, 2); near(f.c, 1); near(f.chi2, 0);
+    const s = sy.map((v) => Math.sqrt(v * v + 4 * 0.0025)), w = s.map((v) => 1 / (v * v));
+    const S = w.reduce((a, b) => a + b), Sx = w.reduce((a, b, i) => a + b * x[i], 0), Sxx = w.reduce((a, b, i) => a + b * x[i] * x[i], 0);
+    near(f.sm, Math.sqrt(S / (S * Sxx - Sx * Sx)));
+    if (!f.converged) throw new Error('did not converge');
+  });
+  test('fit: x errors make chi2 smaller', () => {
+    const x = col(P4, 0), y = col(P4, 1), sy = col(P4, 2), sx = x.map((v) => v * 0.05);
+    const a = EP.linearFit(x, y, sy), b = EP.linearFit(x, y, sy, { sx, useXErrors: true });
+    if (!(b.chi2 < a.chi2)) throw new Error(a.chi2 + ' vs ' + b.chi2);
+    same(EP.linearFit(x, y, sy, { sx, useXErrors: false }).chi2, a.chi2);
+  });
+  test('fit: errors', () => {
+    throwsMsg(() => EP.linearFit([1, 2], [1, 2], [1, 1]), 'at least 3');
+    throwsMsg(() => EP.linearFit([1, 2, 3], [1, 2, 3], [1, 0, 1]), 'greater than 0');
+    throwsMsg(() => EP.linearFit([2, 2, 2], [1, 2, 3], [1, 1, 1]), 'same');
+  });
+  test('chi2 probability: known values', () => {
+    near(EP.chi2Prob(3.841458820694124, 1), 0.05);
+    near(EP.chi2Prob(18.307038053275146, 10), 0.05);
+    near(EP.chi2Prob(4, 2), Math.exp(-2));                 // k=2: Q = e^(-x/2)
+    near(EP.chi2Prob(6, 4), Math.exp(-3) * (1 + 3));       // k=4: Q = e^(-x/2)(1 + x/2)
+    near(EP.chi2Prob(0, 3), 1);
+  });
+
+  test('slope units', () => {
+    same(EP.divideUnits('m / s^2', 'cm').display, 'm / (s^2 cm)');
+    same(EP.divideUnits('V', 'A').display, 'V / A');
+    same(EP.divideUnits('m', 'm'), null);
+    same(EP.divideUnits('m', 'cm').display, 'm/(cm)');
+    same(EP.divideUnits('', 's').display, 's^-1');
+    same(EP.divideUnits('', ''), null);
+  });
+
   root.runTests = function () {
     return cases.map((c) => {
       try { c.fn(); return { name: c.name, ok: true }; }

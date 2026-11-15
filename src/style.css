@@ -223,3 +223,21 @@ input.unit.wide { width: 150px; }
   input.unit { width: 64px; }
   .session-bar .spacer { display: none; }
 }
+
+/* ---------- v5: straight-line fit graph ---------- */
+:root { --fit: #d62728; }
+@media (prefers-color-scheme: dark) { :root { --fit: #ff6b6b; } }
+.graph-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+.graph-section h3 { margin-top: 0; }
+.graph-controls { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; margin-bottom: 10px; }
+.axis-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.axis-pick input.expr { width: 160px; }
+.graph-controls input[type="text"]:not(.expr) { flex: 1; min-width: 180px; }
+.plot { margin-top: 8px; }
+.plot-ylabel { margin-bottom: 4px; }
+.plot-xlabel { text-align: center; margin-top: -2px; }
+.plot-ylabel .tex, .plot-xlabel .tex { font-size: 1.05rem; }
+.plot-svg svg { width: 100%; height: auto; display: block; }
+.plot-svg text { font-size: 13px; }
+.fit-results { display: grid; gap: 4px; margin: 12px 0 4px; }
+.fit-line .katex { font-size: 1.1rem; }

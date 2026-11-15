@@ -20,6 +20,19 @@ All maths is rendered in LaTeX (KaTeX), and the result and the full working can 
 ## Units
 Units are optional. Type them in each variable's unit box (e.g. `cm`, `s`, `kg`, `m/s^2`, `degC`, `deg`). Values and uncertainties are converted to SI, the maths is done in SI, and math.js checks that the equation's units make sense: adding a length to a time, or taking `sin` of a length, gives a clear error. The result's unit is worked out automatically, or you can choose one (e.g. `cm/s^2`, `km/h`, `N`). Uncertainties convert by scale only, so ±0.5 °C is ±0.5 K. Angles given in `deg` or `rad` are handled correctly whichever Angles setting is chosen.
 
+## Straight-line fit and graph
+In table mode, the **Straight-line fit** section plots any two columns against each other. Each axis can be the result, a variable, or an expression such as `T^2` or `1/d^2`, and every axis gets propagated uncertainties. The fit is a weighted least-squares line y = mx + c, using the same formulas as the Year 1 lab's `LSFR-25.py`. Tests check that it reproduces that script's output on real lab data to 9 significant figures.
+
+It gives:
+- m ± σ_m and c ± σ_c, with units
+- χ², degrees of freedom, reduced χ², and the probability P(χ² ≥ observed)
+- a plain-English verdict on the fit
+- a residuals plot
+
+Two optional extras that LSFR doesn't have: include x error bars in the fit (effective variance), and fit a line through the origin.
+
+You can export the graph as a high-resolution PNG (laid out like LSFR's figure), copy it as LaTeX (pgfplots), or copy the fit results as LaTeX. The fit is also included in the CSV.
+
 ## Saved sessions
 Each lab can be its own session: **+ New**, **Rename**, **Duplicate** and **Delete** (two clicks). Everything saves automatically in this browser. Sessions live in the browser you use (and depend on how you open the app), so use **Back up** to download them all as a file and **Restore** to load them elsewhere.
 
@@ -27,7 +40,8 @@ Each lab can be its own session: **+ New**, **Rename**, **Duplicate** and **Dele
 Switch to **Table of readings** to run the same equation on many rows. Each variable's uncertainty can be the same for every row or different for each row. You can paste cells straight from Excel or Google Sheets, and Enter moves down a row. Each row gets its own result and Monte Carlo check. A summary gives the mean ± standard error, the standard deviation and the weighted mean, and warns when the results scatter more than their uncertainties suggest (reduced χ²). Click a row number to see that row's working. Use **Export CSV** to save the table, or **Copy as LaTeX table** for your report.
 
 ## Files
-- `src/propagate.js`: the maths engine (parsing, derivatives, rounding)
+- `src/propagate.js`: the maths engine (parsing, derivatives, rounding, units, linear fit)
+- `src/plot.js`: draws the fit graph and residuals (SVG and PNG)
 - `src/app.js`, `src/style.css`, `index.html`: the interface
 - `tests/tests.js`: test cases with independently worked answers
 - `vendor/math.js`: math.js 12.4.2
@@ -43,4 +57,5 @@ Or open `tests.html` in a browser.
 - **v3** (done): table mode built into the app, paste from Excel, per-row Monte Carlo, summary statistics, CSV export, LaTeX table
 - **v4** (done): saved sessions with backup/restore, units with dimension checking and unit conversion
 - **Hosted** on GitHub Pages
+- **v5**: straight-line fit and graph (LSFR method) in table mode
 - **Later**: units checking, hosting on GitHub Pages

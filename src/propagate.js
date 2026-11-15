@@ -376,6 +376,23 @@
     }).join('\\,');
   }
 
+  /** Unit of a slope (y unit ÷ x unit) as { display, tex }, or null if it has none. */
+  function divideUnits(yu, xu) {
+    yu = String(yu || '').trim(); xu = String(xu || '').trim();
+    if (!yu && !xu) return null;
+    const texOf = (u) => (u ? unitTex(u) : '1');
+    try {
+      const r = math.divide(yu ? math.unit(1, yu) : 1, xu ? math.unit(1, xu) : 1);
+      if (math.isUnit(r)) {
+        const d = r.formatUnits();
+        if (Math.abs(r.toNumber(d) - 1) < 1e-12) return { display: d, tex: unitTex(d) };
+      } else if (Math.abs(r - 1) < 1e-12) {
+        return null;
+      }
+    } catch (e) { /* fall through: keep it as written */ }
+    return { display: (yu || '1') + '/' + (xu ? '(' + xu + ')' : '1'), tex: texOf(yu) + '/' + (xu ? '\\left(' + texOf(xu) + '\\right)' : '1') };
+  }
+
   /** True if the text is a unit math.js understands (e.g. "cm", "m/s^2", "degC"). */
   function isUnit(str) {
     try { return math.unit(String(str).trim()).value === null; } catch (e) { return false; }
@@ -665,6 +682,110 @@
     return { sci: false, value: v, sigma: s, exp: 0, text: v + ' ± ' + s, tex: v + ' \\pm ' + s };
   }
 
+
+  // ---------- Linear fit (same method as the lab's LSFR script) ----------
+  //
+  // Weighted least squares y = m x + c with weights 1/sigma^2, using the
+  // analytic formulas from LSFR-25.py (https://mathworld.wolfram.com/LeastSquaresFitting.html).
+  // Optional extras:
+  //  - origin: fit y = m x (line through the origin)
+  //  - x errors: "effective variance" sigma_eff^2 = sigma_y^2 + (m sigma_x)^2,
+  //    re-fitting until m stops changing (LSFR itself uses y errors only).
+
+  function fitOnce(x, y, w, origin) {
+    let S = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0;
+    for (let i = 0; i < x.length; i++) {
+      S += w[i]; Sx += w[i] * x[i]; Sy += w[i] * y[i];
+      Sxx += w[i] * x[i] * x[i]; Sxy += w[i] * x[i] * y[i];
+    }
+    if (origin) {
+      if (!(Sxx > 0)) throw new InputError('Cannot fit a line through the origin: all x values are 0.');
+      return { m: Sxy / Sxx, c: 0, sm: 1 / Math.sqrt(Sxx), sc: 0 };
+    }
+    const D = S * Sxx - Sx * Sx; // LSFR's "repeated_term"
+    if (!(Math.abs(D) > 0) || !isFinite(D)) throw new InputError('Cannot fit a line: the x values are all the same.');
+    return {
+      m: (S * Sxy - Sx * Sy) / D,
+      c: (Sy * Sxx - Sx * Sxy) / D,
+      sm: Math.sqrt(S / D),
+      sc: Math.sqrt(Sxx / D),
+    };
+  }
+
+  /**
+   * @param {number[]} x, y, sy   data and y uncertainties (all sy must be > 0)
+   * @param {{sx?: number[], useXErrors?: boolean, origin?: boolean}} opts
+   */
+  function linearFit(x, y, sy, opts) {
+    opts = opts || {};
+    const n = x.length;
+    const params = opts.origin ? 1 : 2;
+    if (n < params + 1) throw new InputError('A straight-line fit needs at least ' + (params + 1) + ' points with uncertainties.');
+    if (sy.some((s) => !(s > 0))) throw new InputError('Every point needs a y uncertainty greater than 0.');
+    const sx = opts.sx && opts.useXErrors ? opts.sx : null;
+
+    let sig = sy.slice();
+    let f = fitOnce(x, y, sig.map((s) => 1 / (s * s)), opts.origin);
+    let iterations = 1, converged = true;
+    if (sx && sx.some((s) => s > 0)) {
+      converged = false;
+      for (; iterations < 100; iterations++) {
+        sig = sy.map((s, i) => Math.sqrt(s * s + f.m * f.m * sx[i] * sx[i]));
+        const g = fitOnce(x, y, sig.map((s) => 1 / (s * s)), opts.origin);
+        const done = Math.abs(g.m - f.m) <= 1e-12 * Math.max(Math.abs(g.m), 1e-300);
+        f = g;
+        if (done) { converged = true; break; }
+      }
+    }
+    const residuals = x.map((xi, i) => y[i] - (f.m * xi + f.c));
+    const chi2 = residuals.reduce((a, r, i) => a + (r * r) / (sig[i] * sig[i]), 0);
+    const dof = n - params;
+    return Object.assign(f, {
+      n, dof, chi2, chi2red: chi2 / dof, p: chi2Prob(chi2, dof),
+      residuals, sigmaUsed: sig, iterations, converged, origin: !!opts.origin, xErrors: !!sx,
+    });
+  }
+
+  // ln Gamma(z), Lanczos approximation (accurate to ~1e-15).
+  function lnGamma(z) {
+    const g = 7, c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+      -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lnGamma(1 - z);
+    z -= 1;
+    let a = c[0];
+    const t = z + g + 0.5;
+    for (let i = 1; i < g + 2; i++) a += c[i] / (z + i);
+    return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(a);
+  }
+
+  // Regularized upper incomplete gamma Q(a, x) (Numerical Recipes gser/gcf).
+  function gammaQ(a, x) {
+    if (x <= 0) return 1;
+    if (x < a + 1) {
+      let sum = 1 / a, del = sum, ap = a;
+      for (let i = 0; i < 1000; i++) { ap += 1; del *= x / ap; sum += del; if (Math.abs(del) < Math.abs(sum) * 1e-15) break; }
+      return 1 - sum * Math.exp(-x + a * Math.log(x) - lnGamma(a));
+    }
+    let b = x + 1 - a, c = 1 / 1e-300, d = 1 / b, h = d;
+    for (let i = 1; i < 1000; i++) {
+      const an = -i * (i - a);
+      b += 2;
+      d = an * d + b; if (Math.abs(d) < 1e-300) d = 1e-300;
+      c = b + an / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+      d = 1 / d;
+      const del = d * c;
+      h *= del;
+      if (Math.abs(del - 1) < 1e-15) break;
+    }
+    return Math.exp(-x + a * Math.log(x) - lnGamma(a)) * h;
+  }
+
+  /** Probability of a chi-squared at least this big if the model is right. */
+  function chi2Prob(chi2, dof) {
+    if (!(dof > 0) || !isFinite(chi2)) return NaN;
+    return gammaQ(dof / 2, chi2 / 2);
+  }
+
   // ---------- Tables: summary, CSV, pasted data ----------
 
   /**
@@ -705,6 +826,9 @@
   }
 
   root.ErrorProp = {
+    divideUnits,
+    linearFit,
+    chi2Prob,
     isUnit,
     unitTex,
     toDisplay,

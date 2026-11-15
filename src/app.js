@@ -50,6 +50,13 @@
     });
     while (out.table.rows.length < START_ROWS) out.table.rows.push({});
     out.table.selected = Math.max(0, Math.min(Number(t.selected) || 0, out.table.rows.length - 1));
+    const gr = t.graph && typeof t.graph === 'object' ? t.graph : {};
+    const axis = (a, def) => (typeof a === 'string' && /^(result|custom|var:[A-Za-z_][A-Za-z0-9_]{0,39})$/.test(a) ? a : def);
+    out.table.graph = {
+      x: axis(gr.x, ''), y: axis(gr.y, 'result'),
+      xExpr: str(gr.xExpr, 200), yExpr: str(gr.yExpr, 200),
+      xErrors: !!gr.xErrors, origin: !!gr.origin, title: str(gr.title, 120),
+    };
     return out;
   }
 
@@ -675,11 +682,226 @@
       parts.push(el('p', { class: 'hint' }, 'Add more rows to see the mean.'));
     }
     if (s.chi2red > 2 && s.n >= 3) {
-      parts.push(el('div', { class: 'warn' }, `⚠ The results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}). There may be a systematic error, or the uncertainties may be underestimated. The plain mean ± standard error is the safer one to quote.`));
+      parts.push(el('div', { class: 'warn' }, `⚠ If every row measures the same quantity: the results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}), so there may be a systematic error or underestimated uncertainties, and the plain mean ± standard error is the safer one to quote. (If the rows are meant to change, e.g. points for a graph, ignore this and use the straight-line fit below.)`));
     }
+    parts.push(graphSection());
     parts.push(el('div', { class: 'detail', id: 'detail' }));
     resultBox.replaceChildren(...parts);
+    renderGraph();
     renderDetail();
+  }
+
+  // ================= straight-line fit and graph (LSFR method) =================
+  let lastFit = null; // for the CSV export
+
+  const graphState = () => {
+    const g = state.table.graph;
+    if (!g.x || (g.x.startsWith('var:') && !names.includes(g.x.slice(4)))) g.x = names.length ? 'var:' + names[0] : 'result';
+    if (g.y.startsWith('var:') && !names.includes(g.y.slice(4))) g.y = 'result';
+    return g;
+  };
+
+  function axisOptions(selected) {
+    const s = el('select', null,
+      el('option', { value: 'result' }, resultName() + ' (the result)'),
+      names.map((n) => el('option', { value: 'var:' + n }, n)),
+      el('option', { value: 'custom' }, 'expression…'));
+    s.value = selected;
+    return s;
+  }
+
+  function graphSection() {
+    const g = graphState();
+    const box = el('div', { class: 'graph-section' });
+    const ySel = axisOptions(g.y), xSel = axisOptions(g.x);
+    const exprInput = (key, ph) => {
+      const i = el('input', { type: 'text', class: 'mono expr', placeholder: ph, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': key === 'xExpr' ? 'x axis expression' : 'y axis expression' });
+      i.value = g[key];
+      i.addEventListener('input', () => { g[key] = i.value; save(); renderGraph(); });
+      return i;
+    };
+    const yExpr = exprInput('yExpr', 'e.g. ln(V)'), xExpr = exprInput('xExpr', 'e.g. 1/d^2');
+    const showExpr = () => { yExpr.hidden = g.y !== 'custom'; xExpr.hidden = g.x !== 'custom'; };
+    showExpr();
+    ySel.addEventListener('change', () => { g.y = ySel.value; showExpr(); save(); renderGraph(); });
+    xSel.addEventListener('change', () => { g.x = xSel.value; showExpr(); save(); renderGraph(); });
+    const check = (key, label, title) => {
+      const c = el('input', { type: 'checkbox', checked: g[key] });
+      c.addEventListener('change', () => { g[key] = c.checked; save(); renderGraph(); });
+      return el('label', { class: 'per-row', title }, c, ' ' + label);
+    };
+    const title = el('input', { type: 'text', placeholder: 'Graph title (for the image)', 'aria-label': 'Graph title', autocomplete: 'off' });
+    title.value = g.title;
+    title.addEventListener('input', () => { g.title = title.value; save(); });
+
+    box.append(
+      el('h3', null, 'Straight-line fit'),
+      el('p', { class: 'hint first' }, 'Weighted least-squares fit of y = mx + c, the same method as the lab’s LSFR script. Each point is weighted by 1/σ_y², and points with no y uncertainty are left out.'),
+      el('div', { class: 'graph-controls' },
+        el('label', { class: 'axis-pick' }, el('span', { class: 'opt-label' }, 'y axis'), ySel, yExpr),
+        el('label', { class: 'axis-pick' }, el('span', { class: 'opt-label' }, 'x axis'), xSel, xExpr)),
+      el('div', { class: 'graph-controls' },
+        check('xErrors', 'use x error bars in the fit', 'Effective variance: σ² = σ_y² + (m σ_x)². LSFR itself uses y errors only.'),
+        check('origin', 'line through the origin (y = mx)', 'Fit y = mx with no intercept'),
+        title),
+      el('div', { id: 'graph-out' }));
+    return box;
+  }
+
+  // One axis value for a row: { v, s, unit, error }
+  function axisValue(which, expr, res, rowIndex) {
+    if (which === 'result') {
+      const sh = shown(res.main);
+      return { v: sh.value, s: sh.sigma, unit: res.main.units ? res.main.units.display : '' };
+    }
+    if (which.startsWith('var:')) {
+      const n = which.slice(4);
+      const g = rowGetter(state.table.rows[rowIndex])(n);
+      const x = EP.parseNumber(g.value), u = blank(g.unc) ? 0 : EP.parseNumber(g.unc);
+      return { v: x, s: g.type === 'pct' ? (Math.abs(x) * u) / 100 : u, unit: colState(n).unit.trim() };
+    }
+    if (blank(expr)) return { error: 'type an expression for this axis' };
+    try {
+      const r = RUN[state.method](expr, res.vars, { degrees: state.degrees });
+      const d = EP.toDisplay(r.units, r.value, r.sigma);
+      return { v: d.value, s: d.sigma, unit: r.units ? r.units.display : '' };
+    } catch (e) {
+      const m = /^Enter a value for: (.*)$/.exec(e.message);
+      return { error: m ? `${m[1]} isn’t a column in your table` : e.message };
+    }
+  }
+
+  // Axis title: LaTeX for the page, plain text for the image.
+  function axisTitle(which, expr, unit) {
+    let t, p;
+    if (which === 'result') { t = N(resultName()); p = resultName(); }
+    else if (which.startsWith('var:')) { t = N(which.slice(4)); p = which.slice(4); }
+    else {
+      p = expr.trim();
+      try {
+        const full = EP.equationTex(expr.includes('=') ? expr : 'f = ' + expr);
+        t = expr.includes('=') ? N(expr.split('=')[0].trim()) : full.slice(full.indexOf(' = ') + 3);
+        if (expr.includes('=')) p = expr.split('=')[0].trim();
+      } catch (e) { t = '\\text{?}'; }
+    }
+    return {
+      tex: t + (unit ? '\\ \\left(' + EP.unitTex(unit) + '\\right)' : ''),
+      plain: prettyUnit(p).replace(/\*/g, '·') + (unit ? ' (' + prettyUnit(unit) + ')' : ''),
+    };
+  }
+
+  function renderGraph() {
+    const out = $('graph-out');
+    if (!out) return;
+    lastFit = null;
+    const g = graphState();
+    const pts = [], left = [];
+    let xu = '', yu = '';
+    goodRows().forEach(({ r: res, i }) => {
+      const ax = axisValue(g.x, g.xExpr, res, i), ay = axisValue(g.y, g.yExpr, res, i);
+      const why = ax.error || ay.error;
+      if (why) return left.push(`row ${i + 1} (${why})`);
+      if (!isFinite(ax.v) || !isFinite(ay.v)) return left.push(`row ${i + 1} (not a number)`);
+      if (!(ay.s > 0)) return left.push(`row ${i + 1} (y uncertainty is 0)`);
+      xu = xu || ax.unit; yu = yu || ay.unit;
+      pts.push({ x: ax.v, y: ay.v, sx: ax.s || 0, sy: ay.s, row: i + 1 });
+    });
+    const xt = axisTitle(g.x, g.xExpr, xu), yt = axisTitle(g.y, g.yExpr, yu);
+    pts.forEach((p) => (p.label = `Row ${p.row}: x = ${num(p.x, 5)} ± ${num(p.sx, 3)}, y = ${num(p.y, 5)} ± ${num(p.sy, 3)}`));
+
+    const leftNote = left.length ? el('p', { class: 'hint' }, 'Left out: ' + left.join('; ') + '.') : null;
+    let fit;
+    try {
+      fit = EP.linearFit(pts.map((p) => p.x), pts.map((p) => p.y), pts.map((p) => p.sy),
+        { sx: pts.map((p) => p.sx), useXErrors: g.xErrors, origin: g.origin });
+    } catch (e) {
+      return out.replaceChildren(el('p', { class: 'msg' }, e.message), leftNote || '');
+    }
+
+    const spec = { points: pts, fit, residuals: fit.residuals, rsig: fit.sigmaUsed, ariaLabel: `Graph of ${yt.plain} against ${xt.plain} with fitted line` };
+    const screen = Plot.build(Object.assign({}, spec, { width: out.clientWidth || 760 }), 'screen');
+    const mul = (e) => (e ? '\\;\\left(\\times10^{' + e + '}\\right)' : '');
+    const svgBox = el('div', { class: 'plot-svg' });
+    svgBox.innerHTML = screen.svg; // generated by plot.js; all text in it is escaped
+
+    // Results
+    const slopeU = EP.divideUnits(yu, xu);
+    const yUnits = yu ? { display: yu, tex: EP.unitTex(yu) } : null;
+    const fm = EP.withUnit(fmt(fit.m, fit.sm), slopeU), fc = EP.withUnit(fmt(fit.c, fit.sc), yUnits);
+    const lines = ['m = ' + fm.tex];
+    if (!fit.origin) lines.push('c = ' + fc.tex);
+    lines.push('\\chi^{2} = ' + T(fit.chi2, 4) + ',\\quad \\nu = ' + fit.dof + ',\\quad \\chi^{2}_{\\nu} = \\frac{\\chi^{2}}{\\nu} = ' + T(fit.chi2red, 3));
+    lines.push('P\\left(\\chi^{2} \\ge ' + T(fit.chi2, 4) + '\\right) = ' + T(fit.p, 2));
+    const results = el('div', { class: 'fit-results' }, lines.map((l) => tex(l, false, 'fit-line')));
+    const raw = el('p', { class: 'hint' }, 'Unrounded (as LSFR prints): m = ' + fit.m.toExponential(4) + ' ± ' + fit.sm.toExponential(4) +
+      (fit.origin ? '' : ',  c = ' + fit.c.toExponential(4) + ' ± ' + fit.sc.toExponential(4)) +
+      (fit.xErrors ? `. x errors included by effective variance (${fit.converged ? 'converged' : 'did not fully converge'} after ${fit.iterations} iterations).` : '.'));
+
+    let verdict;
+    if (fit.p < 0.05) verdict = el('div', { class: 'warn' }, `⚠ Reduced χ² = ${num(fit.chi2red, 3)} is large: the points scatter more than their error bars allow (only a ${num(fit.p * 100, 2)}% chance if the line were right). Either the relationship isn’t a straight line, or the uncertainties are underestimated. Look for a pattern in the residuals.`);
+    else if (fit.p > 0.95) verdict = el('div', { class: 'warn' }, `⚠ Reduced χ² = ${num(fit.chi2red, 3)} is small: the points fit better than their error bars suggest. The uncertainties may be overestimated.`);
+    else verdict = el('div', { class: 'check good' }, `✓ Good fit: reduced χ² = ${num(fit.chi2red, 3)} is close to 1, so the line agrees with the data within the error bars.`);
+
+    const fitTex = () => '\\begin{align*}\n' + lines.map((l) => l.replace(' = ', ' &= ')).join(' \\\\\n') + '\n\\end{align*}';
+    const pngBtn = el('button', { type: 'button', class: 'small primary' }, 'Download graph (PNG)');
+    pngBtn.addEventListener('click', () => downloadGraph(spec, xt, yt, fm, fc, fit, pngBtn, slopeU, yUnits));
+    const buttons = el('div', { class: 'buttons' }, pngBtn,
+      copyButton('Copy graph as LaTeX (pgfplots)', () => pgfplots(pts, fit, xt.tex, yt.tex)),
+      copyButton('Copy fit results as LaTeX', fitTex));
+
+    out.replaceChildren(
+      el('div', { class: 'plot' },
+        el('div', { class: 'plot-ylabel' }, el('span', { class: 'muted' }, 'y: '), tex(yt.tex + mul(screen.yE))),
+        svgBox,
+        el('div', { class: 'plot-xlabel' }, el('span', { class: 'muted' }, 'x: '), tex(xt.tex + mul(screen.xE)))),
+      results, verdict, raw, leftNote || '', buttons);
+
+    lastFit = { fit, xt, yt, slopeU, yUnits, n: pts.length };
+  }
+
+  function downloadGraph(spec, xt, yt, fm, fc, fit, btn, slopeU, yUnits) {
+    const g = state.table.graph;
+    const txt = (w, u) => (u && u.display ? w.text.slice(0, w.text.length - u.display.length) + prettyUnit(u.display) : w.text);
+    const info = [
+      [fit.origin ? 'Fit: y = mx' : 'Fit: y = mx + c', 'χ² = ' + num(fit.chi2, 4)],
+      ['m = ' + txt(fm, slopeU), 'Degrees of freedom = ' + fit.dof],
+      [fit.origin ? '' : 'c = ' + txt(fc, yUnits), 'Reduced χ² = ' + num(fit.chi2red, 3)],
+      ['', 'P(χ² ≥ ' + num(fit.chi2, 4) + ') = ' + num(fit.p, 2)],
+    ];
+    const print = Plot.build(Object.assign({}, spec, { title: g.title.trim(), xTitle: xt.plain, yTitle: yt.plain, info }), 'print');
+    Plot.toPng(print.svg, print.width, print.height, 3).then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { href: url, download: safeFile(g.title || 'graph') + '-fit.png' });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      btn.textContent = 'Downloaded ✓'; setTimeout(() => (btn.textContent = 'Download graph (PNG)'), 1500);
+    }, (e) => { btn.textContent = e.message; });
+  }
+
+  const n12 = (x) => String(Number(x.toPrecision(12)));
+
+  function pgfplots(pts, fit, xlabel, ylabel) {
+    const g = state.table.graph;
+    const texEsc = (s) => s.replace(/[\\{}$&#^_%~]/g, (c) => '\\' + (c === '\\' ? 'textbackslash{}' : c === '^' ? '^{}' : c === '~' ? '~{}' : c));
+    const xs = pts.map((p) => p.x);
+    const lo = Math.min(...xs.map((x, i) => x - pts[i].sx)), hi = Math.max(...xs.map((x, i) => x + pts[i].sx));
+    return [
+      '% Needs \\usepackage{pgfplots} and \\pgfplotsset{compat=1.18} in the preamble',
+      '\\begin{tikzpicture}',
+      '\\begin{axis}[',
+      '  width=12cm, height=8cm, grid=major,',
+      g.title.trim() ? '  title={' + texEsc(g.title.trim()) + '},' : null,
+      '  xlabel={$' + xlabel + '$},',
+      '  ylabel={$' + ylabel + '$},',
+      ']',
+      '\\addplot+[only marks, mark=x, color=black, error bars/.cd, x dir=both, x explicit, y dir=both, y explicit]',
+      '  coordinates {',
+      ...pts.map((p) => `    (${n12(p.x)}, ${n12(p.y)}) +- (${n12(p.sx)}, ${n12(p.sy)})`),
+      '  };',
+      `\\addplot[red, thick, domain=${n12(lo)}:${n12(hi)}, samples=2] {${n12(fit.m)}*x + ${n12(fit.c)}};`,
+      '\\end{axis}',
+      '\\end{tikzpicture}',
+    ].filter((l) => l !== null).join('\n');
   }
 
   function summaryLines(s, g, units) {
@@ -775,6 +997,22 @@
       if (isFinite(s.wmean)) rows.push(['weighted mean', s.wmean, s.wsigma]);
       if (isFinite(s.chi2red)) rows.push(['reduced chi-squared', s.chi2red, '']);
       rows.push(['rows', s.n, '']);
+    }
+    if (lastFit) {
+      const F = lastFit.fit, su = lastFit.slopeU ? ' [' + lastFit.slopeU.display + ']' : '', yu = lastFit.yUnits ? ' [' + lastFit.yUnits.display + ']' : '';
+      rows.push([]);
+      rows.push(['straight-line fit (LSFR method)', 'value', 'uncertainty']);
+      rows.push(['y axis', lastFit.yt.plain]);
+      rows.push(['x axis', lastFit.xt.plain]);
+      rows.push(['slope m' + su, F.m, F.sm]);
+      if (!F.origin) rows.push(['intercept c' + yu, F.c, F.sc]);
+      rows.push(['chi-squared', F.chi2]);
+      rows.push(['degrees of freedom', F.dof]);
+      rows.push(['reduced chi-squared', F.chi2red]);
+      rows.push(['P(chi-squared >= observed)', F.p]);
+      rows.push(['points in fit', lastFit.n]);
+      rows.push(['x errors in fit', F.xErrors ? 'yes (effective variance)' : 'no (as LSFR)']);
+      rows.push(['line through origin', F.origin ? 'yes' : 'no']);
     }
     rows.push([]);
     rows.push(['session', store.sessions[store.active].name]);
@@ -1007,6 +1245,14 @@
     }
     builtFor = '';
     update();
+  });
+
+  let resizeTimer = null, lastWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (state.mode === 'table') renderGraph(); }, 200);
   });
 
   renderSessionBar();
