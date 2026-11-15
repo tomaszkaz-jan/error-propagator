@@ -202,3 +202,24 @@ button.primary:hover { filter: brightness(1.08); }
 .sum-row .tex { font-size: 1.15rem; }
 .detail { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
 .detail-head { margin-top: 0; }
+
+/* ---------- v4: sessions and units ---------- */
+.session-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.session-bar select, .session-bar .session-name { max-width: 240px; padding: 6px 10px; }
+.session-bar .spacer { flex: 1; }
+label.button { display: inline-flex; align-items: center; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+label.button.small { padding: 6px 10px; font-size: 0.85rem; }
+label.button:hover { background: var(--accent-soft); }
+.session-note { color: var(--muted); font-size: 0.8rem; margin: 0 0 12px; min-height: 1.2em; }
+.session-note.bad { color: var(--bad); }
+button.danger { color: var(--bad); border-color: var(--bad); }
+
+input.unit { width: 80px; font-family: var(--mono); font-size: 0.9rem; }
+input.unit.wide { width: 150px; }
+.var-row { grid-template-columns: minmax(48px, auto) 1fr auto 1fr auto 80px; }
+.cfg-row input.unit { width: 80px; }
+@media (max-width: 480px) {
+  .var-row { grid-template-columns: 1fr 1fr auto 64px; }
+  input.unit { width: 64px; }
+  .session-bar .spacer { display: none; }
+}

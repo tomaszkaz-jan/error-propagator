@@ -270,6 +270,8 @@
       return v.type === 'pct' ? (Math.abs(x[i]) * u) / 100 : u;
     });
 
+    const units = applyUnits(p, byName, x, sig, opts); // converts x, sig to SI in place
+
     const scope = new Map(Object.entries(CONSTANTS));
     p.variables.forEach((n, i) => scope.set(n, x[i]));
 
@@ -282,7 +284,118 @@
     }
     if (!isFinite(value)) throw new InputError('The result is infinite or undefined (division by zero?).');
 
-    return Object.assign({}, p, { x, sig, scope, value }); // copy: p is cached
+    return Object.assign({}, p, { x, sig, scope, value, units }); // copy: p is cached
+  }
+
+  // ---------- Units ----------
+  //
+  // When any variable has a unit, every value and uncertainty is converted to SI
+  // (angles: to degrees or radians, matching the Angles setting), the maths is
+  // done on plain numbers, and math.js checks the units of the equation and
+  // works out the unit of the result. Uncertainties convert by scale only, so
+  // ±0.5 °C becomes ±0.5 K (not ±273.65 K).
+
+  const RAD = () => math.unit('rad');
+
+  function readUnit(str, what) {
+    let U;
+    try {
+      U = math.unit(str);
+    } catch (e) {
+      throw new InputError('Unknown unit "' + str + '"' + what + '. Try units like m, cm, mm, s, ms, kg, g, N, J, W, V, A, Hz, K, degC, deg, rad.');
+    }
+    if (U.value !== null) throw new InputError('Type only the unit' + what + ' (e.g. "cm"), without a number.');
+    return U;
+  }
+
+  function conversion(fromStr, toStr) {
+    const offset = math.unit(0, fromStr).toNumber(toStr);
+    return { scale: math.unit(1, fromStr).toNumber(toStr) - offset, offset };
+  }
+
+  function friendlyUnitError(err) {
+    const m = err.message || '';
+    if (/Units do not match/.test(m)) return "The units don't match: the equation adds or subtracts quantities with different units (e.g. a length and a time). Check the units of your variables.";
+    if (/no angle/.test(m)) return "A trig function (sin, cos, tan…) was given something that isn't an angle. Check the units.";
+    if (/expected: Unit, actual: number|actual: Unit/.test(m)) return 'A quantity with units is combined with a plain number that has none (e.g. L + 2). Give it a unit, or check the equation.';
+    return 'Units problem: ' + m + '. Functions like log, exp and powers with a variable exponent need inputs without units.';
+  }
+
+  function applyUnits(p, byName, x, sig, opts) {
+    const typed = p.variables.map((n) => String(byName[n].unit || '').trim());
+    if (!typed.some(Boolean)) return null;
+    const degrees = !!opts.degrees;
+    const varUnits = {};
+    const unitScope = new Map(Object.entries(CONSTANTS));
+    p.variables.forEach((n, i) => {
+      if (!typed[i]) { unitScope.set(n, x[i]); return; }
+      const U = readUnit(typed[i], ' for ' + n);
+      const target = U.equalBase(RAD()) ? (degrees ? 'deg' : 'rad') : U.toSI().formatUnits();
+      const c = conversion(typed[i], target);
+      x[i] = x[i] * c.scale + c.offset;
+      sig[i] = sig[i] * Math.abs(c.scale);
+      varUnits[n] = target;
+      unitScope.set(n, math.unit(x[i], target));
+    });
+
+    // Let math.js check the equation's units and find the result's unit.
+    let r;
+    try {
+      r = p.node.evaluate(unitScope);
+    } catch (err) {
+      throw new InputError(friendlyUnitError(err));
+    }
+    let si = '';
+    if (math.isUnit(r)) si = r.equalBase(RAD()) ? (degrees ? 'deg' : 'rad') : r.toSI().formatUnits();
+
+    const want = String(opts.resultUnit || '').trim();
+    let display = si, c = { scale: 1, offset: 0 };
+    if (want) {
+      const W = readUnit(want, ' for the result');
+      if (!si) throw new InputError('The result has no units, so it can’t be shown in ' + want + '.');
+      if (!W.equalBase(math.unit(si))) throw new InputError('The result is in ' + si + ', which can’t be converted to ' + want + '.');
+      c = conversion(si, want);
+      display = want;
+    }
+    return { display, si, tex: unitTex(display), scale: c.scale, offset: c.offset, vars: varUnits };
+  }
+
+  const UNIT_TEX = { deg: '^{\\circ}', degC: '^{\\circ}\\mathrm{C}', degF: '^{\\circ}\\mathrm{F}', ohm: '\\Omega' };
+  const PREFIX_TEX = { u: '\\mu ' };
+
+  /** "m / s^2" -> \mathrm{m}\,\mathrm{s}^{-2} */
+  function unitTex(str) {
+    if (!str) return '';
+    let U;
+    try { U = math.unit(str); } catch (e) { return '\\text{' + str.replace(/[\\{}$&#^_%~]/g, '') + '}'; }
+    return U.units.map((u) => {
+      const name = u.unit.name, pre = u.prefix ? u.prefix.name : '';
+      const base = UNIT_TEX[name] && !pre ? UNIT_TEX[name] : '\\mathrm{' + (PREFIX_TEX[pre] ? '' : pre) + name + '}';
+      const full = PREFIX_TEX[pre] ? PREFIX_TEX[pre] + base : base;
+      return full + (u.power !== 1 ? '^{' + u.power + '}' : '');
+    }).join('\\,');
+  }
+
+  /** True if the text is a unit math.js understands (e.g. "cm", "m/s^2", "degC"). */
+  function isUnit(str) {
+    try { return math.unit(String(str).trim()).value === null; } catch (e) { return false; }
+  }
+
+  /** Converts a result from SI to the display unit. */
+  function toDisplay(units, value, sigma) {
+    if (!units) return { value, sigma };
+    return { value: value * units.scale + units.offset, sigma: sigma * Math.abs(units.scale) };
+  }
+
+  /** LaTeX/text for a formatted result with its unit: (9.79 \pm 0.42)\,\mathrm{m}\,\mathrm{s}^{-2} */
+  function withUnit(f, units) {
+    if (!units || !units.display) return { tex: f.tex, text: f.text };
+    const sep = units.tex.startsWith('^') ? '' : '\\,';
+    const wrap = !f.sci && f.sigma !== null;
+    return {
+      tex: (wrap ? '\\left(' + f.tex + '\\right)' : f.tex) + sep + units.tex,
+      text: (wrap ? '(' + f.text + ')' : f.text) + ' ' + units.display,
+    };
   }
 
   // ---------- Method 1: partial derivatives ----------
@@ -322,7 +435,7 @@
     terms.forEach((t) => (t.share = variance > 0 && isFinite(variance) ? (t.term * t.term) / variance : 0));
 
     return {
-      method: 'partial', name: s.name, value: s.value, sigma,
+      method: 'partial', name: s.name, units: s.units, value: s.value, sigma,
       relative: s.value !== 0 ? sigma / Math.abs(s.value) : Infinity,
       terms, warnings,
       expression: s.node.toString(),
@@ -395,7 +508,7 @@
         ' more than once. The simple rules treat each appearance as separate, which overestimates the uncertainty. The partial-derivative method handles this correctly.');
     }
     return {
-      method: 'rules', name: s.name, value: s.value, sigma: top.d,
+      method: 'rules', name: s.name, units: s.units, value: s.value, sigma: top.d,
       relative: s.value !== 0 ? top.d / Math.abs(s.value) : Infinity,
       steps, warnings,
     };
@@ -427,7 +540,7 @@
     const sigma = (max.v - min.v) / 2;
     const label = (at) => s.variables.map((n, i) => ({ name: n, value: at[i], shift: Math.sign(at[i] - s.x[i]) }));
     return {
-      method: 'maxmin', name: s.name, value: s.value, sigma,
+      method: 'maxmin', name: s.name, units: s.units, value: s.value, sigma,
       relative: s.value !== 0 ? sigma / Math.abs(s.value) : Infinity,
       max: max.v, min: min.v, maxAt: label(max.at), minAt: label(min.at), warnings,
     };
@@ -474,7 +587,7 @@
     for (let k = 0; k < used; k++) ss += (vals[k] - mean) * (vals[k] - mean);
     const pct = (p) => vals[Math.min(used - 1, Math.max(0, Math.round(p * (used - 1))))];
     return {
-      method: 'montecarlo', name: s.name, value: s.value,
+      method: 'montecarlo', name: s.name, units: s.units, value: s.value,
       n: N, used, failed: N - used, mean, sd: Math.sqrt(ss / (used - 1)),
       lo: pct(0.158655), median: pct(0.5), hi: pct(0.841345),
     };
@@ -592,6 +705,10 @@
   }
 
   root.ErrorProp = {
+    isUnit,
+    unitTex,
+    toDisplay,
+    withUnit,
     summarize,
     toCsv,
     parseGrid,

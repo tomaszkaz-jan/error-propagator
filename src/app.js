@@ -1,7 +1,6 @@
 (function () {
   'use strict';
   const EP = window.ErrorProp;
-  const STORE = 'errorprop.v1';
   const METHODS = {
     partial: { label: 'Partial derivatives', short: 'standard, adds in quadrature' },
     rules: { label: 'Simple rules', short: 'step by step, worst case' },
@@ -10,14 +9,81 @@
   const RUN = { partial: EP.calculate, rules: EP.simpleRules, maxmin: EP.maxMin };
   const START_ROWS = 5;
 
-  const state = Object.assign(
-    { equation: '', vars: {}, degrees: false, rounding: 'auto', method: 'partial', mode: 'single', table: null },
-    load() || {}
-  );
-  if (!METHODS[state.method]) state.method = 'partial';
-  if (!state.table) state.table = { cols: {}, rows: [], selected: 0 };
-  while (state.table.rows.length < START_ROWS) state.table.rows.push({});
+  // ================= Saved sessions =================
+  // All sessions live in this browser's localStorage under one key:
+  //   { active: id, sessions: { id: { name, created, updated, data } } }
+  const SKEY = 'errorprop.sessions.v1';
+  const OLD_KEY = 'errorprop.v1';
+  let storageOk = true;
 
+  const str = (v, max) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max || 200);
+  const newId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  // Only known fields with the right types survive (also used for restored backup files).
+  function cleanData(d) {
+    d = d && typeof d === 'object' ? d : {};
+    const out = {
+      equation: str(d.equation, 500),
+      vars: {},
+      degrees: !!d.degrees,
+      rounding: ['auto', '1', '2'].includes(String(d.rounding)) ? String(d.rounding) : 'auto',
+      method: METHODS[d.method] ? d.method : 'partial',
+      mode: d.mode === 'table' ? 'table' : 'single',
+      resultUnit: str(d.resultUnit, 60),
+      table: { cols: {}, rows: [], selected: 0 },
+    };
+    const name = (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && k.length <= 40;
+    const type = (t) => (t === 'pct' ? 'pct' : 'abs');
+    Object.entries(d.vars && typeof d.vars === 'object' ? d.vars : {}).forEach(([k, v]) => {
+      if (name(k) && v && typeof v === 'object') out.vars[k] = { value: str(v.value, 60), unc: str(v.unc, 60), type: type(v.type), unit: str(v.unit, 60) };
+    });
+    const t = d.table && typeof d.table === 'object' ? d.table : {};
+    Object.entries(t.cols && typeof t.cols === 'object' ? t.cols : {}).forEach(([k, c]) => {
+      if (name(k) && c && typeof c === 'object') out.table.cols[k] = { perRow: !!c.perRow, unc: str(c.unc, 60), type: type(c.type), unit: str(c.unit, 60) };
+    });
+    (Array.isArray(t.rows) ? t.rows.slice(0, 2000) : []).forEach((row) => {
+      const r = {};
+      Object.entries(row && typeof row === 'object' ? row : {}).forEach(([k, c]) => {
+        if (name(k) && c && typeof c === 'object') r[k] = { value: str(c.value, 60), unc: str(c.unc, 60) };
+      });
+      out.table.rows.push(r);
+    });
+    while (out.table.rows.length < START_ROWS) out.table.rows.push({});
+    out.table.selected = Math.max(0, Math.min(Number(t.selected) || 0, out.table.rows.length - 1));
+    return out;
+  }
+
+  function loadStore() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SKEY));
+      if (s && s.sessions && typeof s.sessions === 'object' && Object.keys(s.sessions).length) {
+        if (!s.sessions[s.active]) s.active = Object.keys(s.sessions)[0];
+        return s;
+      }
+    } catch (e) { /* fall through */ }
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem(OLD_KEY)); } catch (e) { /* none */ }
+    const id = newId(), now = Date.now();
+    return { active: id, sessions: { [id]: { name: 'My first session', created: now, updated: now, data: cleanData(old) } } };
+  }
+
+  const store = loadStore();
+  const state = cleanData(store.sessions[store.active].data);
+
+  function save() {
+    const s = store.sessions[store.active];
+    s.data = JSON.parse(JSON.stringify(state));
+    s.updated = Date.now();
+    try {
+      localStorage.setItem(SKEY, JSON.stringify(store));
+      storageOk = true;
+    } catch (e) {
+      storageOk = false;
+    }
+    savedLabel();
+  }
+
+  // ================= DOM helpers =================
   let names = [];             // variables in the current equation
   let builtFor = '';          // what the input area was last built for
   let detailTimer = null, rowMcTimer = null, token = 0;
@@ -26,15 +92,8 @@
 
   const $ = (id) => document.getElementById(id);
   const eqInput = $('eq'), varsBox = $('vars'), tableBox = $('table-box'), resultBox = $('result');
-  const roundSel = $('round'), preview = $('eq-preview');
+  const roundSel = $('round'), preview = $('eq-preview'), resultUnitInput = $('result-unit');
 
-  // ---------- helpers ----------
-  function load() {
-    try { return JSON.parse(localStorage.getItem(STORE)); } catch (e) { return null; }
-  }
-  function save() {
-    try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* private mode */ }
-  }
   function el(tag, attrs, ...kids) {
     const n = document.createElement(tag);
     Object.entries(attrs || {}).forEach(([k, v]) => {
@@ -70,10 +129,23 @@
   const N = EP.nameTex;
   const roundMode = () => (state.rounding === 'auto' ? 'auto' : Number(state.rounding));
   const fmt = (v, s) => EP.formatResult(v, s, roundMode());
-  const varState = (n) => (state.vars[n] = state.vars[n] || { value: '', unc: '', type: 'abs' });
-  const colState = (n) => (state.table.cols[n] = state.table.cols[n] || { perRow: false, unc: '', type: 'abs' });
+  const varState = (n) => (state.vars[n] = state.vars[n] || { value: '', unc: '', type: 'abs', unit: '' });
+  const colState = (n) => (state.table.cols[n] = state.table.cols[n] || { perRow: false, unc: '', type: 'abs', unit: '' });
   const cellState = (row, n) => (row[n] = row[n] || { value: '', unc: '' });
   const blank = (s) => String(s == null ? '' : s).trim() === '';
+  const engineOpts = () => ({ degrees: state.degrees, resultUnit: state.resultUnit });
+
+  /** A result in its display unit: { f: formatted, tex, text, value, sigma } */
+  function shown(r) {
+    const d = EP.toDisplay(r.units, r.value, r.sigma);
+    const f = fmt(d.value, d.sigma);
+    const u = EP.withUnit(f, r.units);
+    return { f, tex: u.tex, text: r.units && r.units.display ? u.text.slice(0, -r.units.display.length) + prettyUnit(r.units.display) : u.text, value: d.value, sigma: d.sigma };
+  }
+  // "m / s^2" -> "m/s²", "(kg m) / s^2" -> "(kg m)/s²" for plain text
+  const prettyUnit = (s) => String(s).replace(/ \/ /g, '/').replace(/\^(-?\d+)/g, (m, d) => sup(d));
+  const unitSuffix = (units) => (units && units.display ? ' ' + prettyUnit(units.display) : '');
+  const unitTexSuffix = (units) => (units && units.display ? (units.tex.startsWith('^') ? '' : '\\,') + units.tex : '');
 
   function copyText(text, b, label) {
     const done = () => { b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = label), 1500); };
@@ -98,16 +170,27 @@
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  const safeFile = (s) => str(s, 60).replace(/[^A-Za-z0-9 _-]+/g, '').trim().replace(/\s+/g, '-') || 'results';
   function mark(input) {
     input.classList.toggle('invalid', !blank(input.value) && isNaN(EP.parseNumber(input.value)));
+  }
+  function markUnit(input) {
+    input.classList.toggle('invalid', !blank(input.value) && !EP.isUnit(input.value));
   }
   // A typed number as LaTeX, keeping the person's significant figures where possible.
   function typedTex(s) {
     const t = String(s).trim();
     return /^[-+]?(\d+\.?\d*|\.\d+)$/.test(t) ? t : T(EP.parseNumber(t), 6);
   }
+  function unitInput(value, label, onChange) {
+    const u = el('input', { class: 'unit', type: 'text', placeholder: 'unit', 'aria-label': label, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    u.value = value || '';
+    markUnit(u);
+    u.addEventListener('input', () => { markUnit(u); onChange(u.value); });
+    return u;
+  }
 
-  // ---------- main update ----------
+  // ================= main update =================
   function update() {
     save();
     token++;
@@ -142,22 +225,22 @@
     const vars = [];
     const missing = [];
     for (const n of names) {
-      const { value: vs, unc: us, type, needUnc } = get(n);
+      const { value: vs, unc: us, type, needUnc, unit } = get(n);
       if (blank(vs)) { missing.push(n); continue; }
       if (needUnc && blank(us)) { missing.push('uncertainty of ' + n); continue; }
       const value = EP.parseNumber(vs);
       const unc = blank(us) ? 0 : EP.parseNumber(us);
       if (isNaN(value)) return { error: `Can't read "${vs}" as a number (value of ${n}).` };
       if (isNaN(unc)) return { error: `Can't read "${us}" as a number (uncertainty of ${n}).` };
-      vars.push({ name: n, value, unc, type });
+      vars.push({ name: n, value, unc, type, unit: unit || '' });
     }
     if (missing.length) return { missing };
     return { vars };
   }
 
-  // Runs all three methods. Returns { lin, all, main } or { error }.
+  // Runs the methods. Returns { lin, all, main, vars } or { error }.
   function runAll(vars, onlyMain) {
-    const opts = { degrees: state.degrees };
+    const opts = engineOpts();
     let lin;
     try { lin = EP.calculate(state.equation, vars, opts); } catch (e) { return { error: e.message }; }
     const all = { partial: lin };
@@ -170,7 +253,7 @@
     return { lin, all, main, vars };
   }
 
-  // ---------- single mode ----------
+  // ================= single mode =================
   function renderVars() {
     varsBox.replaceChildren();
     if (!names.length) {
@@ -188,8 +271,10 @@
       unc.addEventListener('input', () => { s.unc = unc.value; mark(unc); update(); });
       type.addEventListener('change', () => { s.type = type.value; update(); });
       mark(value); mark(unc);
-      varsBox.append(el('div', { class: 'var-row' }, tex(N(n), false, 'var-name'), value, el('span', { class: 'pm' }, '±'), unc, type));
+      const unit = unitInput(s.unit, n + ' unit', (u) => { s.unit = u; update(); });
+      varsBox.append(el('div', { class: 'var-row' }, tex(N(n), false, 'var-name'), value, el('span', { class: 'pm' }, '±'), unc, type, unit));
     });
+    varsBox.append(el('p', { class: 'hint' }, 'Units are optional. Give them (e.g. cm, s, kg, degC, deg) and the app converts to SI and checks that your equation’s units make sense.'));
   }
   function typeSelect(value, n) {
     const s = el('select', { 'aria-label': n + ' uncertainty type' },
@@ -207,24 +292,24 @@
     renderResult(resultBox, res);
   }
 
-  // ---------- result rendering (single mode, and the selected row in table mode) ----------
+  // ================= result rendering =================
   function renderResult(box, res) {
     const { main: r, lin, all, vars } = res;
-    const f = fmt(r.value, r.sigma);
-    const resultTex = N(r.name) + ' = ' + f.tex;
+    const sh = shown(r);
+    const resultTex = N(r.name) + ' = ' + sh.tex;
     const parts = [];
 
     parts.push(el('div', { class: 'answer' },
       tex(resultTex, false, 'big'),
       el('div', { class: 'buttons' },
-        copyButton('Copy', () => r.name + ' = ' + f.text),
+        copyButton('Copy', () => r.name + ' = ' + sh.text),
         copyButton('Copy LaTeX', () => resultTex))));
 
     const sub = el('div', { class: 'sub' });
     if (r.sigma > 0) sub.append(METHODS[r.method].label + '  ·  Relative uncertainty ' + num(r.relative * 100, 2) + '%  ·  Unrounded: ');
     else if (isNaN(r.sigma)) sub.append('The uncertainty could not be worked out with this method.  Value: ');
     else sub.append('No uncertainty: every variable has uncertainty 0.  Unrounded: ');
-    sub.append(el('span', { class: 'mono' }, num(r.value, 8) + (r.sigma > 0 ? ' ± ' + num(r.sigma, 6) : '')));
+    sub.append(el('span', { class: 'mono' }, num(sh.value, 8) + (r.sigma > 0 ? ' ± ' + num(sh.sigma, 6) : '') + unitSuffix(r.units)));
     parts.push(sub);
 
     const warnings = [...new Set([...(r.warnings || []), ...(r === lin ? [] : lin.warnings)])];
@@ -234,7 +319,7 @@
       parts.push(el('div', { class: 'check pending mc-check' }, 'Running Monte Carlo check…'));
       parts.push(...contributions(lin, r !== lin));
     }
-    if (r.sigma > 0) parts.push(...working(r, f));
+    if (r.sigma > 0) parts.push(...working(r, sh));
     if (lin.sigma > 0) parts.push(...comparison(all));
     box.replaceChildren(...parts);
 
@@ -243,7 +328,7 @@
       detailTimer = setTimeout(() => {
         if (t !== token) return;
         let mc;
-        try { mc = EP.monteCarlo(state.equation, vars, { degrees: state.degrees }); } catch (e) { return showMc(box, null, e.message); }
+        try { mc = EP.monteCarlo(state.equation, vars, engineOpts()); } catch (e) { return showMc(box, null, e.message); }
         if (t === token) showMc(box, lin, mc);
       }, 150);
     }
@@ -268,7 +353,7 @@
   }
 
   // Working: a list of [lhs, rhs, comment] lines, shown as maths and copyable as LaTeX.
-  function working(r, f) {
+  function working(r, sh) {
     const g = N(r.name);
     const lines = [];
     if (r.method === 'partial') {
@@ -285,10 +370,15 @@
       lines.push(['{' + g + '}_{\\min}', at(r.minAt) + ' = ' + T(r.min, 6)]);
       lines.push(['\\Delta ' + g, '\\frac{' + g + '_{\\max} - ' + g + '_{\\min}}{2} = \\frac{' + T(r.max, 6) + ' - ' + T(r.min, 6) + '}{2} = ' + T(r.sigma)]);
     }
-    lines.push([g, f.tex]);
+    lines.push([g, sh.tex]);
 
     const latex = () => '\\begin{align*}\n' + lines.map((l) => l[0] + ' &= ' + l[1] + (l[2] ? ' % ' + l[2] : '')).join(' \\\\\n') + '\n\\end{align*}';
     const out = [el('div', { class: 'section-head' }, el('h3', null, 'Working'), copyButton('Copy working as LaTeX', latex))];
+    if (r.units) {
+      const list = Object.entries(r.units.vars).map(([n, u]) => n + ' in ' + u).join(', ');
+      const conv = r.units.display !== r.units.si ? `, then the result is converted to ${r.units.display}` : '';
+      out.push(el('p', { class: 'hint first' }, `Working is in SI units (${list}${conv}).`));
+    }
     const box = el('div', { class: 'working' });
     lines.forEach((l) => {
       box.append(tex(l[0] + ' = ' + l[1], true));
@@ -304,9 +394,7 @@
   function comparison(all) {
     const rows = Object.keys(METHODS).map((m) => {
       const r = all[m];
-      const cell = r instanceof Error
-        ? el('span', { class: 'muted' }, r.message)
-        : tex(fmt(r.value, r.sigma).tex);
+      const cell = r instanceof Error ? el('span', { class: 'muted' }, r.message) : tex(shown(r).tex);
       const tr = el('tr', { class: m === state.method ? 'on' : 'pick', title: 'Use this method' },
         el('td', null, METHODS[m].label, el('div', { class: 'muted' }, METHODS[m].short)), el('td', null, cell));
       if (m !== state.method && !(r instanceof Error)) tr.addEventListener('click', () => setMethod(m, true));
@@ -326,23 +414,26 @@
     if (!lin) { box.className = 'check bad mc-check'; box.textContent = '⚠ ' + mc; return; }
     const c = EP.mcCheck(lin, mc);
     const n = mc.n.toLocaleString('en-GB');
+    const u = lin.units, k = u ? Math.abs(u.scale) : 1;
+    const asym = asymTex(EP.toDisplay(u, mc.median, 0).value, c.up * k, c.down * k) + unitTexSuffix(u);
     box.replaceChildren();
     if (c.ok) {
       box.className = 'check good mc-check';
-      box.append(`✓ Monte Carlo check passed: ${n} simulated measurements have a 68% spread of ±${num(c.spread, 3)}, matching the formula (σ = ${num(lin.sigma, 3)}).`);
+      box.append(`✓ Monte Carlo check passed: ${n} simulated measurements have a 68% spread of ±${num(c.spread * k, 3)}${unitSuffix(u)}, matching the formula (σ = ${num(lin.sigma * k, 3)}${unitSuffix(u)}).`);
     } else {
       box.className = 'check bad mc-check';
       box.append('⚠ Monte Carlo check: ' + mcProblems(c, lin).join('; ') + '. Your uncertainties are big enough that the formula\'s straight-line approximation isn\'t reliable here. Consider quoting the Monte Carlo result: ');
-      box.append(tex(N(lin.name) + ' = ' + asymTex(mc.median, c.up, c.down)));
+      box.append(tex(N(lin.name) + ' = ' + asym));
     }
     if (row) {
       row.lastChild.className = '';
-      row.lastChild.replaceChildren(tex(asymTex(mc.median, c.up, c.down)));
+      row.lastChild.replaceChildren(tex(asym));
     }
   }
   function mcProblems(c, lin) {
+    const k = lin.units ? Math.abs(lin.units.scale) : 1, us = unitSuffix(lin.units);
     const why = [];
-    if (Math.abs(c.sdDiff) >= 0.05) why.push(`the 68% spread is ±${num(c.spread, 3)}, ${num(Math.abs(c.sdDiff) * 100, 2)}% ${c.sdDiff > 0 ? 'bigger' : 'smaller'} than the formula's σ = ${num(lin.sigma, 3)}`);
+    if (Math.abs(c.sdDiff) >= 0.05) why.push(`the 68% spread is ±${num(c.spread * k, 3)}${us}, ${num(Math.abs(c.sdDiff) * 100, 2)}% ${c.sdDiff > 0 ? 'bigger' : 'smaller'} than the formula's σ = ${num(lin.sigma * k, 3)}${us}`);
     if (c.asym <= 0.8 || c.asym >= 1.25) why.push('the spread is lopsided (asymmetric)');
     if (c.shift >= 0.1) why.push('the typical result is shifted away from the calculated value');
     if (c.failedFrac >= 0.001) why.push(`${num(c.failedFrac * 100, 2)}% of simulated values were impossible (e.g. square root of a negative)`);
@@ -352,13 +443,13 @@
   // median^{+up}_{-down}, all rounded to the same decimal place (like value ± uncertainty).
   function asymTex(median, up, down) {
     const fUp = fmt(median, up), fDown = fmt(median, down);
-    if (fUp.sci || fDown.sci) return T(median, 4) + '^{+' + T(up, 2) + '}_{-' + T(down, 2) + '}';
+    if (fUp.sci || fDown.sci || fUp.sigma == null || fDown.sigma == null) return T(median, 4) + '^{+' + T(up, 2) + '}_{-' + T(down, 2) + '}';
     const dp = Math.max(...[fUp, fDown].map((f) => (f.sigma.split('.')[1] || '').length));
     const fix = (x) => (dp > 0 ? x.toFixed(dp) : String(Math.round(x)));
     return fix(median) + '^{+' + fix(up) + '}_{-' + fix(down) + '}';
   }
 
-  // ---------- table mode ----------
+  // ================= table mode =================
 
   // Editable columns in order (used for paste and Enter-to-move-down).
   const editCols = () => names.flatMap((n) => (colState(n).perRow ? [[n, 'value'], [n, 'unc']] : [[n, 'value']]));
@@ -370,7 +461,7 @@
       tableBox.append(el('p', { class: 'empty' }, 'Your columns will appear here once you type an equation.'));
       return;
     }
-    // Uncertainty settings per variable
+    // Uncertainty and unit settings per variable
     const config = el('div', { class: 'col-config' });
     names.forEach((n) => {
       const c = colState(n);
@@ -380,6 +471,8 @@
       mark(unc);
       const type = typeSelect(c.type, n);
       type.addEventListener('change', () => { c.type = type.value; update(); });
+      const unit = unitInput(c.unit, n + ' unit', (u) => { c.unit = u; builtFor = ''; update(); refocus('.cfg-row', n); });
+      unit.dataset.var = n;
       const per = el('input', { type: 'checkbox', checked: c.perRow });
       per.addEventListener('change', () => {
         c.perRow = per.checked;
@@ -394,16 +487,17 @@
       });
       config.append(el('div', { class: 'cfg-row' },
         tex(N(n), false, 'var-name'),
-        el('span', { class: 'pm' }, '±'), unc, type,
+        el('span', { class: 'pm' }, '±'), unc, type, unit,
         el('label', { class: 'per-row' }, per, ' different for each row')));
     });
-    tableBox.append(el('p', { class: 'hint first' }, 'Uncertainty of each variable (same for every row, unless you tick the box):'), config);
+    tableBox.append(el('p', { class: 'hint first' }, 'Uncertainty (same for every row, unless you tick the box) and unit of each variable:'), config);
 
     // The grid
     const cols = editCols();
+    const unitOf = (n) => (blank(colState(n).unit) ? '' : '\\ (' + EP.unitTex(colState(n).unit.trim()) + ')');
     const head = el('tr', null, el('th', { class: 'rownum' }, '#'),
-      cols.map(([n, field]) => el('th', null, tex(field === 'unc' ? '\\sigma_{' + N(n) + '}' : N(n)))),
-      el('th', { class: 'res-col' }, tex(N(resultName()))), el('th', { title: 'Monte Carlo check' }, 'check'), el('th'));
+      cols.map(([n, field]) => el('th', null, tex((field === 'unc' ? '\\sigma_{' + N(n) + '}' : N(n)) + unitOf(n)))),
+      el('th', { class: 'res-col' }, el('span', { class: 'res-head' }, tex(N(resultName())))), el('th', { title: 'Monte Carlo check' }, 'check'), el('th'));
     const body = el('tbody');
     state.table.rows.forEach((row, r) => {
       const tr = el('tr', { class: r === state.table.selected ? 'sel' : '' });
@@ -455,6 +549,12 @@
       el('span', { class: 'hint' }, 'Tip: copy cells from Excel and paste them into any cell. Enter moves down.')));
   }
 
+  // After a rebuild, put the cursor back in the unit box being typed in.
+  function refocus(sel, n) {
+    const u = tableBox.querySelector(`${sel} input.unit[data-var="${n}"]`);
+    if (u) { u.focus(); const l = u.value.length; u.setSelectionRange(l, l); }
+  }
+
   function resultName() {
     const i = state.equation.indexOf('=');
     return (i > 0 && state.equation.slice(0, i).trim()) || 'f';
@@ -484,12 +584,12 @@
     const grid = EP.parseGrid(text);
     const cols = editCols();
     const r0 = Number(t.dataset.r), c0 = Number(t.dataset.c);
-    grid.forEach((line, i) => {
+    grid.slice(0, 2000).forEach((line, i) => {
       const r = r0 + i;
       while (state.table.rows.length <= r) state.table.rows.push({});
       line.forEach((val, j) => {
         const col = cols[c0 + j];
-        if (col) cellState(state.table.rows[r], col[0])[col[1]] = val;
+        if (col) cellState(state.table.rows[r], col[0])[col[1]] = str(val, 60);
       });
     });
     builtFor = '';
@@ -508,11 +608,12 @@
   function rowGetter(row) {
     return (n) => {
       const c = colState(n), cell = cellState(row, n);
-      return { value: cell.value, unc: c.perRow ? cell.unc : c.unc, type: c.type, needUnc: c.perRow };
+      return { value: cell.value, unc: c.perRow ? cell.unc : c.unc, type: c.type, needUnc: c.perRow, unit: c.unit };
     };
   }
 
   function updateTable() {
+    let units = null;
     rowResults = state.table.rows.map((row, r) => {
       const cells = rowCells[r];
       const empty = names.every((n) => blank(cellState(row, n).value));
@@ -527,18 +628,28 @@
         cells.chk.replaceChildren();
         return res;
       }
-      const f = fmt(res.main.value, res.main.sigma);
-      cells.res.replaceChildren(tex(f.tex));
+      units = units || res.main.units;
+      const sh = shown(res.main);
+      cells.res.replaceChildren(tex(sh.f.tex));
       if (res.main.sigma > 0) cells.res.append(el('span', { class: 'muted rel' }, ' ' + num(res.main.relative * 100, 2) + '%'));
       cells.chk.replaceChildren(el('span', { class: 'muted' }, res.lin.sigma > 0 ? '…' : ''));
       return res;
     });
+    // result unit in the column header
+    const head = tableBox.querySelector('.res-head');
+    if (head) head.replaceChildren(tex(N(resultName()) + (units && units.display ? '\\ (' + units.tex + ')' : '')));
     renderSummary();
     scheduleRowChecks();
   }
 
   function goodRows() {
     return rowResults.map((r, i) => ({ r, i })).filter(({ r }) => r && !r.error);
+  }
+
+  // Summary statistics, worked out in the display unit.
+  function tableSummary(good) {
+    const vals = good.map(({ r }) => shown(r.main));
+    return EP.summarize(vals.map((v) => v.value), vals.map((v) => v.sigma));
   }
 
   function renderSummary() {
@@ -548,14 +659,14 @@
       const anyStarted = rowResults.some((r) => r);
       return message(resultBox, anyStarted ? 'Finish entering at least one row to see results.' : 'Enter your readings in the table (or paste them from a spreadsheet).');
     }
-    const name = good[0].r.main.name, g = N(name);
-    const s = EP.summarize(good.map(({ r }) => r.main.value), good.map(({ r }) => r.main.sigma));
+    const first = good[0].r.main, g = N(first.name);
+    const s = tableSummary(good);
+    const csvBtn = el('button', { type: 'button', class: 'small primary' }, 'Export CSV');
+    csvBtn.addEventListener('click', exportCsv);
     parts.push(el('div', { class: 'section-head first' }, el('h3', null, `Summary of ${good.length} row${good.length > 1 ? 's' : ''}`),
-      el('div', { class: 'buttons' },
-        (() => { const b = el('button', { type: 'button', class: 'small primary' }, 'Export CSV'); b.addEventListener('click', exportCsv); return b; })(),
-        copyButton('Copy as LaTeX table', latexTable))));
+      el('div', { class: 'buttons' }, csvBtn, copyButton('Copy as LaTeX table', latexTable))));
 
-    const lines = summaryLines(s, g);
+    const lines = summaryLines(s, g, first.units);
     if (lines.length) {
       const list = el('div', { class: 'summary' });
       lines.forEach(([t, note]) => list.append(el('div', { class: 'sum-row' }, tex(t), el('span', { class: 'muted' }, note))));
@@ -566,21 +677,20 @@
     if (s.chi2red > 2 && s.n >= 3) {
       parts.push(el('div', { class: 'warn' }, `⚠ The results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}). There may be a systematic error, or the uncertainties may be underestimated. The plain mean ± standard error is the safer one to quote.`));
     }
-
-    // Working for the selected row
     parts.push(el('div', { class: 'detail', id: 'detail' }));
     resultBox.replaceChildren(...parts);
     renderDetail();
   }
 
-  function summaryLines(s, g) {
+  function summaryLines(s, g, units) {
     const lines = [];
+    const wu = (f) => EP.withUnit(f, units).tex;
     if (s.n > 1) {
-      lines.push(['\\bar{' + g + '} = ' + fmt(s.mean, s.sem).tex, 'mean ± standard error (σ/√n, from the spread of the results)']);
-      lines.push(['s_{' + g + '} = ' + T(s.sd, 3), 'standard deviation of the results']);
+      lines.push(['\\bar{' + g + '} = ' + wu(fmt(s.mean, s.sem)), 'mean ± standard error (σ/√n, from the spread of the results)']);
+      lines.push(['s_{' + g + '} = ' + T(s.sd, 3) + unitTexSuffix(units), 'standard deviation of the results']);
     }
     if (isFinite(s.wmean) && s.n > 1) {
-      lines.push([g + '_{w} = ' + fmt(s.wmean, s.wsigma).tex, 'weighted mean (each row weighted by 1/σ²)']);
+      lines.push([g + '_{w} = ' + wu(fmt(s.wmean, s.wsigma)), 'weighted mean (each row weighted by 1/σ²)']);
     }
     return lines;
   }
@@ -589,11 +699,10 @@
     const box = $('detail');
     if (!box) return;
     const good = goodRows();
-    let sel = state.table.selected;
+    const sel = state.table.selected;
     const chosen = rowResults[sel] && !rowResults[sel].error ? sel : good.length ? good[0].i : -1;
     if (chosen < 0) { box.replaceChildren(); return; }
-    // the detail needs all methods for the comparison table
-    const res = runAll(rowResults[chosen].vars);
+    const res = runAll(rowResults[chosen].vars); // all methods, for the comparison
     if (res.error) { box.replaceChildren(); return; }
     const inner = el('div');
     box.replaceChildren(el('h3', { class: 'detail-head' }, `Working for row ${chosen + 1}`,
@@ -611,7 +720,7 @@
       const { r, i } = queue.shift();
       const cell = rowCells[i] && rowCells[i].chk;
       try {
-        const mc = EP.monteCarlo(state.equation, r.vars, { degrees: state.degrees }, { n: 20000 });
+        const mc = EP.monteCarlo(state.equation, r.vars, engineOpts(), { n: 20000 });
         const c = EP.mcCheck(r.lin, mc);
         r.mc = { mc, c };
         if (cell) cell.replaceChildren(c.ok
@@ -625,13 +734,18 @@
     rowMcTimer = setTimeout(next, 300);
   }
 
-  // ---------- export ----------
+  // ================= export =================
   function exportCsv() {
     const good = goodRows();
-    const name = good.length ? good[0].r.main.name : 'f';
+    const first = good.length ? good[0].r.main : null;
+    const name = first ? first.name : resultName();
+    const ru = first && first.units && first.units.display ? ' [' + first.units.display + ']' : '';
     const header = ['row'];
-    names.forEach((n) => header.push(n, n + ' uncertainty'));
-    header.push(name, name + ' uncertainty', name + ' (rounded)', name + ' uncertainty (rounded)', 'relative uncertainty (%)', 'Monte Carlo check', 'notes');
+    names.forEach((n) => {
+      const u = blank(colState(n).unit) ? '' : ' [' + colState(n).unit.trim() + ']';
+      header.push(n + u, n + ' uncertainty' + u);
+    });
+    header.push(name + ru, name + ' uncertainty' + ru, name + ' (rounded)', name + ' uncertainty (rounded)', 'relative uncertainty (%)', 'Monte Carlo check', 'notes');
     const rows = [header];
     const rounded = (f) => (f.sci ? f.value + 'e' + f.exp : f.value);
     rowResults.forEach((res, i) => {
@@ -645,17 +759,17 @@
       if (res.error) {
         line.push('', '', '', '', '', '', res.error);
       } else {
-        const r = res.main, f = fmt(r.value, r.sigma);
-        line.push(r.value, r.sigma, rounded(f), f.sigma == null ? '' : f.sigma, r.sigma > 0 ? r.relative * 100 : 0,
+        const r = res.main, sh = shown(r);
+        line.push(sh.value, sh.sigma, rounded(sh.f), sh.f.sigma == null ? '' : sh.f.sigma, r.sigma > 0 ? r.relative * 100 : 0,
           res.mc ? (res.mc.c.ok ? 'passed' : 'warning: ' + mcProblems(res.mc.c, res.lin).join('; ')) : '',
           [...(r.warnings || [])].join(' '));
       }
       rows.push(line);
     });
-    const s = good.length ? EP.summarize(good.map(({ r }) => r.main.value), good.map(({ r }) => r.main.sigma)) : null;
+    const s = good.length ? tableSummary(good) : null;
     if (s && s.n > 1) {
       rows.push([]);
-      rows.push(['summary', 'value', 'uncertainty']);
+      rows.push(['summary', 'value' + ru, 'uncertainty' + ru]);
       rows.push(['mean ± standard error', s.mean, s.sem]);
       rows.push(['standard deviation', s.sd, '']);
       if (isFinite(s.wmean)) rows.push(['weighted mean', s.wmean, s.wsigma]);
@@ -663,24 +777,29 @@
       rows.push(['rows', s.n, '']);
     }
     rows.push([]);
+    rows.push(['session', store.sessions[store.active].name]);
     rows.push(['equation', state.equation]);
     rows.push(['method', METHODS[state.method].label]);
     rows.push(['angles', state.degrees ? 'degrees' : 'radians']);
-    download((name || 'results') + '-results.csv', '\uFEFF' + EP.toCsv(rows), 'text/csv;charset=utf-8');
+    download(safeFile(name) + '-results.csv', '\uFEFF' + EP.toCsv(rows), 'text/csv;charset=utf-8');
   }
 
   function latexTable() {
     const cols = names.map((n) => {
       const c = colState(n);
-      const fixedUnc = !c.perRow && !blank(c.unc) ? ' \\; (\\pm ' + typedTex(c.unc) + (c.type === 'pct' ? '\\%' : '') + ')' : '';
-      return { n, c, head: '$' + N(n) + fixedUnc + '$' };
+      const parts = [];
+      if (!blank(c.unit)) parts.push(EP.unitTex(c.unit.trim()));
+      if (!c.perRow && !blank(c.unc)) parts.push('\\pm ' + typedTex(c.unc) + (c.type === 'pct' ? '\\%' : ''));
+      return { n, c, head: '$' + N(n) + (parts.length ? ' \\; (' + parts.join(',\\ ') + ')' : '') + '$' };
     });
     const good = goodRows();
-    const name = good.length ? good[0].r.main.name : 'f';
+    const first = good.length ? good[0].r.main : null;
+    const name = first ? first.name : resultName();
+    const ru = first && first.units && first.units.display ? ' \\; (' + first.units.tex + ')' : '';
     const lines = [];
     lines.push('\\begin{tabular}{' + 'c'.repeat(cols.length + 1) + '}');
     lines.push('\\hline');
-    lines.push(cols.map((c) => c.head).concat('$' + N(name) + '$').join(' & ') + ' \\\\');
+    lines.push(cols.map((c) => c.head).concat('$' + N(name) + ru + '$').join(' & ') + ' \\\\');
     lines.push('\\hline');
     good.forEach(({ r, i }) => {
       const row = state.table.rows[i];
@@ -689,20 +808,138 @@
         const val = typedTex(cell.value);
         return '$' + (c.perRow && !blank(cell.unc) ? val + ' \\pm ' + typedTex(cell.unc) + (c.type === 'pct' ? '\\%' : '') : val) + '$';
       });
-      const f = fmt(r.main.value, r.main.sigma);
-      lines.push(cells.concat('$' + f.tex + '$').join(' & ') + ' \\\\');
+      lines.push(cells.concat('$' + shown(r.main).f.tex + '$').join(' & ') + ' \\\\');
     });
     lines.push('\\hline');
-    const s = good.length ? EP.summarize(good.map(({ r }) => r.main.value), good.map(({ r }) => r.main.sigma)) : null;
+    const s = good.length ? tableSummary(good) : null;
     if (s && s.n > 1) {
-      summaryLines(s, N(name)).forEach(([t]) => lines.push('\\multicolumn{' + (cols.length + 1) + '}{l}{$' + t + '$} \\\\'));
+      summaryLines(s, N(name), first.units).forEach(([t]) => lines.push('\\multicolumn{' + (cols.length + 1) + '}{l}{$' + t + '$} \\\\'));
       lines.push('\\hline');
     }
     lines.push('\\end{tabular}');
     return lines.join('\n');
   }
 
-  // ---------- controls ----------
+  // ================= session bar =================
+  const sessSelect = $('session-select');
+  const sessNote = $('session-note');
+
+  function savedLabel(msg) {
+    if (msg) { sessNote.textContent = msg; sessNote.className = 'session-note'; return; }
+    sessNote.textContent = storageOk ? 'Saved automatically' : 'Not saved: this browser is blocking storage';
+    sessNote.className = 'session-note' + (storageOk ? '' : ' bad');
+  }
+
+  function renderSessionBar() {
+    sessSelect.replaceChildren(...Object.entries(store.sessions)
+      .sort((a, b) => (a[1].created || 0) - (b[1].created || 0))
+      .map(([id, s]) => el('option', { value: id }, s.name)));
+    sessSelect.value = store.active;
+  }
+
+  function switchSession(id) {
+    if (!store.sessions[id]) return;
+    store.active = id;
+    const fresh = cleanData(store.sessions[id].data);
+    Object.keys(state).forEach((k) => delete state[k]);
+    Object.assign(state, fresh);
+    applyControls();
+    builtFor = '';
+    renderSessionBar();
+    update();
+  }
+
+  function uniqueName(base) {
+    const used = new Set(Object.values(store.sessions).map((s) => s.name));
+    if (!used.has(base)) return base;
+    for (let i = 2; ; i++) if (!used.has(base + ' ' + i)) return base + ' ' + i;
+  }
+
+  function addSession(name, data) {
+    const id = newId(), now = Date.now();
+    store.sessions[id] = { name: uniqueName(name), created: now, updated: now, data: cleanData(data) };
+    return id;
+  }
+
+  // Inline rename: swap the dropdown for a text box.
+  function startRename() {
+    const s = store.sessions[store.active];
+    const input = el('input', { type: 'text', class: 'session-name', value: s.name, 'aria-label': 'Session name', maxlength: '80' });
+    sessSelect.hidden = true;
+    sessSelect.after(input);
+    input.focus(); input.select();
+    let done = false;
+    const finish = (keep) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      if (keep && v && v !== s.name) { s.name = uniqueName(v.slice(0, 80)); save(); }
+      input.remove();
+      sessSelect.hidden = false;
+      renderSessionBar();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  sessSelect.addEventListener('change', () => switchSession(sessSelect.value));
+  $('s-new').addEventListener('click', () => {
+    const id = addSession('New lab', { mode: state.mode, degrees: state.degrees, rounding: state.rounding, method: state.method });
+    switchSession(id);
+    startRename();
+  });
+  $('s-rename').addEventListener('click', startRename);
+  $('s-dup').addEventListener('click', () => {
+    const id = addSession(store.sessions[store.active].name + ' (copy)', JSON.parse(JSON.stringify(state)));
+    switchSession(id);
+  });
+  const delBtn = $('s-del');
+  delBtn.addEventListener('click', () => {
+    if (!delBtn.dataset.armed) {
+      delBtn.dataset.armed = '1';
+      delBtn.textContent = 'Click again to delete';
+      delBtn.classList.add('danger');
+      setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; delBtn.classList.remove('danger'); }, 3000);
+      return;
+    }
+    delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; delBtn.classList.remove('danger');
+    const gone = store.sessions[store.active].name;
+    delete store.sessions[store.active];
+    const ids = Object.keys(store.sessions);
+    switchSession(ids.length ? ids[0] : addSession('My first session', {}));
+    savedLabel(`Deleted “${gone}”`);
+  });
+  $('s-backup').addEventListener('click', () => {
+    save();
+    const backup = { app: 'error-propagator', version: 1, exported: new Date().toISOString(), sessions: Object.values(store.sessions).map((s) => ({ name: s.name, data: s.data })) };
+    download('error-propagator-backup-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(backup, null, 1), 'application/json');
+  });
+  $('s-restore-file').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5e6) return savedLabel('That file is too big to be a backup.');
+    file.text().then((text) => {
+      let data;
+      try { data = JSON.parse(text); } catch (err) { return savedLabel('That file isn’t a backup from this app.'); }
+      const list = data && Array.isArray(data.sessions) ? data.sessions : null;
+      if (!list || !list.length) return savedLabel('No sessions found in that file.');
+      let firstId = null;
+      list.slice(0, 200).forEach((s) => {
+        if (!s || typeof s !== 'object') return;
+        const id = addSession(str(s.name, 80).trim() || 'Restored session', s.data);
+        firstId = firstId || id;
+      });
+      if (!firstId) return savedLabel('No sessions found in that file.');
+      switchSession(firstId);
+      savedLabel(`Restored ${list.length} session${list.length > 1 ? 's' : ''}`);
+    });
+  });
+
+  // ================= controls =================
   function setDegrees(on) {
     state.degrees = on;
     document.querySelectorAll('[data-deg]').forEach((b) => b.classList.toggle('on', (b.dataset.deg === '1') === on));
@@ -733,8 +970,18 @@
       if (!v) return;
       const c = colState(n);
       if (blank(c.unc)) { c.unc = v.unc; c.type = v.type; }
+      if (blank(c.unit)) c.unit = v.unit || '';
       cellState(t.rows[0], n).value = v.value;
     });
+  }
+  function applyControls() {
+    eqInput.value = state.equation;
+    roundSel.value = state.rounding;
+    resultUnitInput.value = state.resultUnit;
+    markUnit(resultUnitInput);
+    setDegrees(!!state.degrees);
+    setMethod(state.method, false);
+    setMode(state.mode, false);
   }
 
   document.querySelectorAll('[data-deg]').forEach((b) =>
@@ -744,27 +991,25 @@
   document.querySelectorAll('[data-mode]').forEach((b) =>
     b.addEventListener('click', () => setMode(b.dataset.mode, true)));
   roundSel.addEventListener('change', () => { state.rounding = roundSel.value; update(); });
+  resultUnitInput.addEventListener('input', () => { state.resultUnit = resultUnitInput.value; markUnit(resultUnitInput); update(); });
   eqInput.addEventListener('input', () => { state.equation = eqInput.value; builtFor = ''; update(); });
   $('example').addEventListener('click', () => {
     state.equation = eqInput.value = 'g = 4*pi^2*L/T^2';
     if (state.mode === 'table') {
-      state.table.cols.L = { perRow: false, unc: '0.002', type: 'abs' };
-      state.table.cols.T = { perRow: false, unc: '0.03', type: 'abs' };
-      const data = [['0.300', '1.10'], ['0.400', '1.27'], ['0.500', '1.42'], ['0.600', '1.55'], ['0.700', '1.68']];
+      state.table.cols.L = { perRow: false, unc: '0.2', type: 'abs', unit: 'cm' };
+      state.table.cols.T = { perRow: false, unc: '0.03', type: 'abs', unit: 's' };
+      const data = [['30.0', '1.10'], ['40.0', '1.27'], ['50.0', '1.42'], ['60.0', '1.55'], ['70.0', '1.68']];
       state.table.rows = data.map(([L, T]) => ({ L: { value: L, unc: '' }, T: { value: T, unc: '' } }));
       state.table.selected = 0;
     } else {
-      state.vars.L = { value: '0.500', unc: '0.002', type: 'abs' };
-      state.vars.T = { value: '1.42', unc: '0.03', type: 'abs' };
+      state.vars.L = { value: '50.0', unc: '0.2', type: 'abs', unit: 'cm' };
+      state.vars.T = { value: '1.42', unc: '0.03', type: 'abs', unit: 's' };
     }
     builtFor = '';
     update();
   });
 
-  eqInput.value = state.equation;
-  roundSel.value = state.rounding;
-  setDegrees(!!state.degrees);
-  setMethod(state.method, false);
-  setMode(state.mode === 'table' ? 'table' : 'single', false);
+  renderSessionBar();
+  applyControls();
   update();
 })();

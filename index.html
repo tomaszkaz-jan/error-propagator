@@ -12,6 +12,18 @@
     <header>
       <h1>Error Propagator</h1>
       <p class="tagline">Type an equation, enter your measurements, get the result ± uncertainty.</p>
+      <div class="session-bar">
+        <label for="session-select" class="opt-label">Session</label>
+        <select id="session-select" aria-label="Saved session"></select>
+        <button type="button" class="ghost small" id="s-new">+ New</button>
+        <button type="button" class="ghost small" id="s-rename">Rename</button>
+        <button type="button" class="ghost small" id="s-dup">Duplicate</button>
+        <button type="button" class="ghost small" id="s-del">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost small" id="s-backup" title="Download all sessions as a file">Back up</button>
+        <label class="button ghost small" title="Load sessions from a backup file">Restore<input type="file" id="s-restore-file" accept=".json,application/json" hidden></label>
+      </div>
+      <p id="session-note" class="session-note"></p>
       <div class="seg mode-switch" role="group" aria-label="Mode">
         <button type="button" data-mode="single">Single calculation</button>
         <button type="button" data-mode="table">Table of readings</button>
@@ -34,6 +46,7 @@
           <li><code>sin cos tan</code>, <code>asin acos atan</code>. Choose degrees or radians below.</li>
           <li>Constants: <code>pi</code> and <code>e</code>. Any other name is a variable, so <code>E</code>, <code>c</code>, <code>phi</code> are fine. Greek names like <code>theta</code> show as symbols, and <code>v_max</code> gives a subscript.</li>
           <li>Numbers like <code>6.67e-11</code> or <code>6.67x10^-11</code>. A constant you know exactly can be a variable with uncertainty 0.</li>
+          <li>Units (optional), typed in each variable's unit box: <code>m cm mm um nm</code>, <code>s ms min h</code>, <code>kg g</code>, <code>N J W Pa</code>, <code>V A ohm C F T</code>, <code>Hz</code>, <code>K degC</code>, <code>deg rad</code>, and combinations like <code>m/s^2</code> or <code>kg m^2</code>.</li>
         </ul>
       </details>
     </section>
@@ -63,6 +76,10 @@
           <button type="button" data-deg="0">Radians</button>
           <button type="button" data-deg="1">Degrees</button>
         </div>
+      </div>
+      <div class="opt">
+        <label class="opt-label" for="result-unit">Result unit</label>
+        <input id="result-unit" class="unit wide" type="text" placeholder="automatic (SI)" autocomplete="off" autocapitalize="off" spellcheck="false">
       </div>
       <div class="opt">
         <label class="opt-label" for="round">Round uncertainty to</label>

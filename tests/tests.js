@@ -273,6 +273,77 @@
     near(calc('x^2', [v('x', 3, 0.1)], { degrees: true }).sigma, 0.6);
   });
 
+  // ----- Units -----
+  const vu = (name, value, unc, unit, type) => ({ name, value, unc, unit, type: type || 'abs' });
+  test('units: none given -> units null', () => same(calc('x*y', [v('x', 2, 0.1), v('y', 3, 0.2)]).units, null));
+  test('units: cm and s -> m/s', () => {
+    const r = calc('v = d/t', [vu('d', 100, 1, 'cm'), vu('t', 2, 0.1, 's')]);
+    near(r.value, 0.5); near(r.sigma, 0.5 * Math.hypot(0.01, 0.05));
+    same(r.units.display, 'm / s');
+  });
+  test('units: pendulum with L in cm gives m/s^2', () => {
+    const r = calc('g = 4*pi^2*L/T^2', [vu('L', 50, 0.2, 'cm'), vu('T', 1.42, 0.03, 's')]);
+    const g = (4 * Math.PI ** 2 * 0.5) / 1.42 ** 2;
+    near(r.value, g); near(r.sigma, g * Math.hypot(0.002 / 0.5, (2 * 0.03) / 1.42));
+    same(r.units.display, 'm / s^2');
+  });
+  test('units: result shown in km/h', () => {
+    const r = calc('v = d/t', [vu('d', 100, 1, 'm'), vu('t', 10, 0.1, 's')], { resultUnit: 'km/h' });
+    const d = EP.toDisplay(r.units, r.value, r.sigma);
+    near(d.value, 36); near(d.sigma, 36 * Math.hypot(0.01, 0.01));
+  });
+  test('units: °C uncertainty converts by scale only', () => {
+    const r = calc('dT = T1 - T2', [vu('T1', 20, 0.5, 'degC'), vu('T2', 10, 0.5, 'degC')]);
+    near(r.value, 10); near(r.sigma, Math.hypot(0.5, 0.5)); same(r.units.display, 'K');
+  });
+  test('units: single °C value becomes kelvin', () => {
+    const r = calc('T = t', [vu('t', 20, 0.5, 'degC')]);
+    near(r.value, 293.15); near(r.sigma, 0.5);
+    const d = EP.toDisplay(calc('T = t', [vu('t', 20, 0.5, 'degC')], { resultUnit: 'degC' }).units, r.value, r.sigma);
+    near(d.value, 20); near(d.sigma, 0.5);
+  });
+  test('units: % uncertainty with units', () => near(calc('x', [vu('x', 50, 2, 'cm', 'pct')]).sigma, 0.01));
+  test('units: deg unit works with radians setting', () => {
+    const r = calc('sin(theta)', [vu('theta', 30, 1, 'deg')]);
+    near(r.value, 0.5); near(r.sigma, Math.cos(30 * D) * D);
+  });
+  test('units: deg unit works with degrees setting', () => {
+    const r = calc('sin(theta)', [vu('theta', 30, 1, 'deg')], { degrees: true });
+    near(r.value, 0.5); near(r.sigma, Math.cos(30 * D) * D);
+  });
+  test('units: rad unit with degrees setting', () => {
+    const r = calc('sin(theta)', [vu('theta', Math.PI / 6, 0.01, 'rad')], { degrees: true });
+    near(r.value, 0.5); near(r.sigma, Math.cos(Math.PI / 6) * 0.01);
+  });
+  test('units: mixing units of the same kind (mm + cm)', () => {
+    const r = calc('L = a + b', [vu('a', 5, 0.1, 'mm'), vu('b', 2, 0.1, 'cm')]);
+    near(r.value, 0.025); near(r.sigma, Math.hypot(0.0001, 0.001)); same(r.units.display, 'm');
+  });
+  test('units: dimensionless result', () => same(calc('r = a/b', [vu('a', 2, 0, 'm'), vu('b', 50, 0, 'cm')]).units.display, ''));
+  test('units: force in N', () => {
+    const r = calc('F = m*a', [vu('m', 2, 0.1, 'kg'), vu('a', 3, 0.1, 'm/s^2')], { resultUnit: 'N' });
+    near(r.value, 6); same(r.units.display, 'N'); near(r.units.scale, 1);
+  });
+  test('units: other methods carry units', () => {
+    const vars = [vu('d', 100, 1, 'cm'), vu('t', 2, 0.1, 's')];
+    same(EP.simpleRules('v = d/t', vars).units.display, 'm / s');
+    same(EP.maxMin('v = d/t', vars).units.display, 'm / s');
+    near(EP.maxMin('v = d/t', vars).max, 1.01 / 1.9);
+  });
+  test('units error: adding length and time', () => throwsMsg(() => calc('x + y', [vu('x', 1, 0, 'm'), vu('y', 1, 0, 's')]), "don't match"));
+  test('units error: sin of a length', () => throwsMsg(() => calc('sin(x)', [vu('x', 1, 0, 'm')]), 'angle'));
+  test('units error: plain number added', () => throwsMsg(() => calc('x + 2', [vu('x', 1, 0, 'm')]), 'plain number'));
+  test('units error: unknown unit', () => throwsMsg(() => calc('x', [vu('x', 1, 0, 'furlongz')]), 'Unknown unit'));
+  test('units error: number in unit box', () => throwsMsg(() => calc('x', [vu('x', 1, 0, '5 cm')]), 'only the unit'));
+  test('units error: wrong result unit', () => throwsMsg(() => calc('v = d/t', [vu('d', 1, 0, 'm'), vu('t', 1, 0, 's')], { resultUnit: 'kg' }), "can’t be converted"));
+  test('units: LaTeX', () => {
+    same(EP.unitTex('m / s^2'), '\\mathrm{m}\\,\\mathrm{s}^{-2}');
+    same(EP.unitTex('cm'), '\\mathrm{cm}');
+    same(EP.unitTex('um'), '\\mu \\mathrm{m}');
+    same(EP.unitTex('deg'), '^{\\circ}');
+    same(EP.withUnit(EP.formatResult(9.79, 0.42, 'auto'), { display: 'm / s^2', tex: 'U' }).text, '(9.8 ± 0.4) m / s^2');
+  });
+
   root.runTests = function () {
     return cases.map((c) => {
       try { c.fn(); return { name: c.name, ok: true }; }
