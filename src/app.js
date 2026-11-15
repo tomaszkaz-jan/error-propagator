@@ -4,7 +4,7 @@
   const METHODS = {
     partial: { label: 'Partial derivatives', short: 'standard, adds in quadrature' },
     rules: { label: 'Simple rules', short: 'step by step, worst case' },
-    maxmin: { label: 'Max–min', short: 'half the range of extremes' },
+    maxmin: { label: 'Max-min', short: 'half the range of extremes' },
   };
   const RUN = { partial: EP.calculate, rules: EP.simpleRules, maxmin: EP.maxMin };
   const START_ROWS = 5;
@@ -207,7 +207,7 @@
       preview.replaceChildren(tex(EP.equationTex(state.equation), true));
     } catch (err) {
       preview.replaceChildren();
-      if (blank(state.equation)) { names = []; rebuildInputs(); resultBox.replaceChildren(); return; }
+      if (blank(state.equation)) { names = []; rebuildInputs(); emptyState(); return; }
       return message(resultBox, err.message, true);
     }
     rebuildInputs();
@@ -221,6 +221,34 @@
     if (key === builtFor && !force) return;
     builtFor = key;
     if (state.mode === 'table') renderTable(); else renderVars();
+  }
+
+  // Shown before any equation is typed: a few real lab equations to start from.
+  const EXAMPLES = [
+    { name: 'Pendulum', eq: 'g = 4*pi^2*L/T^2', vars: { L: ['50.0', '0.2', 'cm'], T: ['1.42', '0.03', 's'] } },
+    { name: 'Snell’s law', eq: 'n = sin(a)/sin(b)', vars: { a: ['40', '0.5', 'deg'], b: ['25', '0.5', 'deg'] } },
+    { name: 'Ohm’s law', eq: 'R = V/I', vars: { V: ['5.02', '0.05', 'V'], I: ['0.213', '0.002', 'A'] } },
+    { name: 'Kinetic energy', eq: 'E_k = 0.5*m*v^2', vars: { m: ['0.250', '0.001', 'kg'], v: ['3.1', '0.1', 'm/s'] } },
+  ];
+  function emptyState() {
+    const list = el('div', { class: 'examples' });
+    EXAMPLES.forEach((ex) => {
+      const b = el('button', { type: 'button' }, el('span', { class: 'ex-name' }, ex.name), el('span', { class: 'ex-eq' }, ex.eq));
+      b.addEventListener('click', () => loadExample(ex));
+      list.append(b);
+    });
+    resultBox.replaceChildren(el('div', { class: 'empty-state' },
+      el('h2', null, 'Start with an equation'),
+      el('p', null, 'Type your own above, or open one of these worked examples with realistic measurements and units.'),
+      list));
+  }
+  function loadExample(ex) {
+    if (state.mode !== 'single') setMode('single', false);
+    state.equation = eqInput.value = ex.eq;
+    Object.entries(ex.vars).forEach(([n, [value, unc, unit]]) => (state.vars[n] = { value, unc, type: 'abs', unit }));
+    builtFor = '';
+    update();
+    eqInput.focus();
   }
 
   function message(box, text, isError) {
@@ -267,6 +295,9 @@
       varsBox.append(el('p', { class: 'empty' }, 'Your variables will appear here once you type an equation.'));
       return;
     }
+    varsBox.append(el('div', { class: 'var-head', 'aria-hidden': 'true' },
+      el('span', { class: 'h-name' }, 'Name'), el('span', null, 'Value'), el('span', { class: 'h-pm' }),
+      el('span', null, 'Uncertainty'), el('span', null, 'Type'), el('span', null, 'Unit')));
     names.forEach((n) => {
       const s = varState(n);
       const value = el('input', { class: 'v', type: 'text', inputmode: 'decimal', placeholder: 'value', 'aria-label': n + ' value', autocomplete: 'off' });
@@ -320,7 +351,7 @@
     parts.push(sub);
 
     const warnings = [...new Set([...(r.warnings || []), ...(r === lin ? [] : lin.warnings)])];
-    warnings.forEach((w) => parts.push(el('div', { class: 'warn' }, '⚠ ' + w)));
+    warnings.forEach((w) => parts.push(el('div', { class: 'warn' }, w)));
 
     if (lin.sigma > 0) {
       parts.push(el('div', { class: 'check pending mc-check' }, 'Running Monte Carlo check…'));
@@ -411,14 +442,14 @@
     return [
       el('h3', null, 'Compare methods'),
       el('div', { class: 'table-wrap' }, el('table', { class: 'compare' }, el('tbody', null, rows))),
-      el('p', { class: 'hint' }, 'Simple rules and max–min give a worst-case uncertainty, so they come out larger. Click a method to use it.'),
+      el('p', { class: 'hint' }, 'Simple rules and max-min give a worst-case uncertainty, so they come out larger. Click a method to use it.'),
     ];
   }
 
   function showMc(container, lin, mc) {
     const box = container.querySelector('.mc-check'), row = container.querySelector('.mc-row');
     if (!box) return;
-    if (!lin) { box.className = 'check bad mc-check'; box.textContent = '⚠ ' + mc; return; }
+    if (!lin) { box.className = 'check bad mc-check'; box.textContent = mc; return; }
     const c = EP.mcCheck(lin, mc);
     const n = mc.n.toLocaleString('en-GB');
     const u = lin.units, k = u ? Math.abs(u.scale) : 1;
@@ -429,7 +460,7 @@
       box.append(`✓ Monte Carlo check passed: ${n} simulated measurements have a 68% spread of ±${num(c.spread * k, 3)}${unitSuffix(u)}, matching the formula (σ = ${num(lin.sigma * k, 3)}${unitSuffix(u)}).`);
     } else {
       box.className = 'check bad mc-check';
-      box.append('⚠ Monte Carlo check: ' + mcProblems(c, lin).join('; ') + '. Your uncertainties are big enough that the formula\'s straight-line approximation isn\'t reliable here. Consider quoting the Monte Carlo result: ');
+      box.append('Monte Carlo check: ' + mcProblems(c, lin).join('; ') + '. Your uncertainties are big enough that the formula\'s straight-line approximation isn\'t reliable here. Consider quoting the Monte Carlo result: ');
       box.append(tex(N(lin.name) + ' = ' + asym));
     }
     if (row) {
@@ -631,7 +662,7 @@
       else if (read.missing) res = { error: 'Missing ' + read.missing.join(', '), missing: true };
       else res = runAll(read.vars, true);
       if (res.error) {
-        cells.res.replaceChildren(el('span', { class: res.missing ? 'muted' : 'cell-error', title: res.error }, res.missing ? res.error : '⚠ ' + res.error));
+        cells.res.replaceChildren(el('span', { class: res.missing ? 'muted' : 'cell-error', title: res.error }, res.error));
         cells.chk.replaceChildren();
         return res;
       }
@@ -682,7 +713,7 @@
       parts.push(el('p', { class: 'hint' }, 'Add more rows to see the mean.'));
     }
     if (s.chi2red > 2 && s.n >= 3) {
-      parts.push(el('div', { class: 'warn' }, `⚠ If every row measures the same quantity: the results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}), so there may be a systematic error or underestimated uncertainties, and the plain mean ± standard error is the safer one to quote. (If the rows are meant to change, e.g. points for a graph, ignore this and use the straight-line fit below.)`));
+      parts.push(el('div', { class: 'warn' }, `If every row measures the same quantity: the results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}), so there may be a systematic error or underestimated uncertainties, and the plain mean ± standard error is the safer one to quote. (If the rows are meant to change, e.g. points for a graph, ignore this and use the straight-line fit below.)`));
     }
     parts.push(graphSection());
     parts.push(el('div', { class: 'detail', id: 'detail' }));
@@ -705,7 +736,7 @@
     const s = el('select', null,
       el('option', { value: 'result' }, resultName() + ' (the result)'),
       names.map((n) => el('option', { value: 'var:' + n }, n)),
-      el('option', { value: 'custom' }, 'expression…'));
+      el('option', { value: 'custom' }, 'expression'));
     s.value = selected;
     return s;
   }
@@ -730,7 +761,7 @@
       c.addEventListener('change', () => { g[key] = c.checked; save(); renderGraph(); });
       return el('label', { class: 'per-row', title }, c, ' ' + label);
     };
-    const title = el('input', { type: 'text', placeholder: 'Graph title (for the image)', 'aria-label': 'Graph title', autocomplete: 'off' });
+    const title = el('input', { type: 'text', placeholder: 'Title for the PNG', 'aria-label': 'Graph title', autocomplete: 'off' });
     title.value = g.title;
     title.addEventListener('input', () => { g.title = title.value; save(); });
 
@@ -838,8 +869,8 @@
       (fit.xErrors ? `. x errors included by effective variance (${fit.converged ? 'converged' : 'did not fully converge'} after ${fit.iterations} iterations).` : '.'));
 
     let verdict;
-    if (fit.p < 0.05) verdict = el('div', { class: 'warn' }, `⚠ Reduced χ² = ${num(fit.chi2red, 3)} is large: the points scatter more than their error bars allow (only a ${num(fit.p * 100, 2)}% chance if the line were right). Either the relationship isn’t a straight line, or the uncertainties are underestimated. Look for a pattern in the residuals.`);
-    else if (fit.p > 0.95) verdict = el('div', { class: 'warn' }, `⚠ Reduced χ² = ${num(fit.chi2red, 3)} is small: the points fit better than their error bars suggest. The uncertainties may be overestimated.`);
+    if (fit.p < 0.05) verdict = el('div', { class: 'warn' }, `Reduced χ² = ${num(fit.chi2red, 3)} is large: the points scatter more than their error bars allow (only a ${num(fit.p * 100, 2)}% chance if the line were right). Either the relationship isn’t a straight line, or the uncertainties are underestimated. Look for a pattern in the residuals.`);
+    else if (fit.p > 0.95) verdict = el('div', { class: 'warn' }, `Reduced χ² = ${num(fit.chi2red, 3)} is small: the points fit better than their error bars suggest. The uncertainties may be overestimated.`);
     else verdict = el('div', { class: 'check good' }, `✓ Good fit: reduced χ² = ${num(fit.chi2red, 3)} is close to 1, so the line agrees with the data within the error bars.`);
 
     const fitTex = () => '\\begin{align*}\n' + lines.map((l) => l.replace(' = ', ' &= ')).join(' \\\\\n') + '\n\\end{align*}';
@@ -946,10 +977,10 @@
         const c = EP.mcCheck(r.lin, mc);
         r.mc = { mc, c };
         if (cell) cell.replaceChildren(c.ok
-          ? el('span', { class: 'ok-mark', title: 'Monte Carlo check passed' }, '✓')
-          : el('span', { class: 'warn-mark', title: 'Monte Carlo check: ' + mcProblems(c, r.lin).join('; ') + '. Click the row number for details.' }, '⚠'));
+          ? el('span', { class: 'ok-mark', title: 'Monte Carlo check passed', 'aria-label': 'Monte Carlo check passed' }, '✓')
+          : el('span', { class: 'warn-mark', title: 'Monte Carlo check: ' + mcProblems(c, r.lin).join('; ') + '. Click the row number for details.', 'aria-label': 'Monte Carlo warning' }, '!'));
       } catch (e) {
-        if (cell) cell.replaceChildren(el('span', { class: 'warn-mark', title: e.message }, '⚠'));
+        if (cell) cell.replaceChildren(el('span', { class: 'warn-mark', title: e.message, 'aria-label': 'Warning' }, '!'));
       }
       rowMcTimer = setTimeout(next, 0);
     };
@@ -1123,14 +1154,22 @@
     input.addEventListener('blur', () => finish(true));
   }
 
+  const sessMenu = $('s-menu');
+  const closeMenu = () => { sessMenu.open = false; };
+  document.addEventListener('click', (e) => { if (sessMenu.open && !sessMenu.contains(e.target)) closeMenu(); });
+  sessMenu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sessMenu.open) { closeMenu(); sessMenu.querySelector('summary').focus(); }
+  });
+
   sessSelect.addEventListener('change', () => switchSession(sessSelect.value));
   $('s-new').addEventListener('click', () => {
     const id = addSession('New lab', { mode: state.mode, degrees: state.degrees, rounding: state.rounding, method: state.method });
     switchSession(id);
     startRename();
   });
-  $('s-rename').addEventListener('click', startRename);
+  $('s-rename').addEventListener('click', () => { closeMenu(); startRename(); });
   $('s-dup').addEventListener('click', () => {
+    closeMenu();
     const id = addSession(store.sessions[store.active].name + ' (copy)', JSON.parse(JSON.stringify(state)));
     switchSession(id);
   });
@@ -1139,11 +1178,11 @@
     if (!delBtn.dataset.armed) {
       delBtn.dataset.armed = '1';
       delBtn.textContent = 'Click again to delete';
-      delBtn.classList.add('danger');
-      setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; delBtn.classList.remove('danger'); }, 3000);
+      setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete session'; }, 3000);
       return;
     }
-    delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; delBtn.classList.remove('danger');
+    delete delBtn.dataset.armed; delBtn.textContent = 'Delete session';
+    closeMenu();
     const gone = store.sessions[store.active].name;
     delete store.sessions[store.active];
     const ids = Object.keys(store.sessions);
@@ -1151,11 +1190,13 @@
     savedLabel(`Deleted “${gone}”`);
   });
   $('s-backup').addEventListener('click', () => {
+    closeMenu();
     save();
     const backup = { app: 'error-propagator', version: 1, exported: new Date().toISOString(), sessions: Object.values(store.sessions).map((s) => ({ name: s.name, data: s.data })) };
     download('error-propagator-backup-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(backup, null, 1), 'application/json');
   });
   $('s-restore-file').addEventListener('change', (e) => {
+    closeMenu();
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file) return;
@@ -1178,18 +1219,22 @@
   });
 
   // ================= controls =================
+  function pressed(b, on) {
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
   function setDegrees(on) {
     state.degrees = on;
-    document.querySelectorAll('[data-deg]').forEach((b) => b.classList.toggle('on', (b.dataset.deg === '1') === on));
+    document.querySelectorAll('[data-deg]').forEach((b) => pressed(b, (b.dataset.deg === '1') === on));
   }
   function setMethod(m, recalc) {
     state.method = m;
-    document.querySelectorAll('[data-method]').forEach((b) => b.classList.toggle('on', b.dataset.method === m));
+    document.querySelectorAll('[data-method]').forEach((b) => pressed(b, b.dataset.method === m));
     if (recalc) update();
   }
   function setMode(m, recalc) {
     state.mode = m;
-    document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+    document.querySelectorAll('[data-mode]').forEach((b) => pressed(b, b.dataset.mode === m));
     $('single-card').hidden = m !== 'single';
     $('table-card').hidden = m !== 'table';
     if (m === 'table' && recalc) seedTable();
@@ -1245,6 +1290,14 @@
     }
     builtFor = '';
     update();
+  });
+
+  const themeSel = $('theme');
+  try { themeSel.value = localStorage.getItem('errorprop.theme') || ''; } catch (e) { /* storage blocked */ }
+  themeSel.addEventListener('change', () => {
+    const t = themeSel.value;
+    if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+    try { if (t) localStorage.setItem('errorprop.theme', t); else localStorage.removeItem('errorprop.theme'); } catch (e) { /* ignore */ }
   });
 
   let resizeTimer = null, lastWidth = window.innerWidth;

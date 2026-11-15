@@ -536,7 +536,7 @@
   function maxMin(text, vars, opts) {
     const s = setup(text, vars, opts);
     const unc = s.variables.map((_, i) => i).filter((i) => s.sig[i] > 0);
-    if (unc.length > MAXMIN_LIMIT) throw new InputError('Max–min needs too many combinations for more than ' + MAXMIN_LIMIT + ' uncertain variables.');
+    if (unc.length > MAXMIN_LIMIT) throw new InputError('Max-min needs too many combinations for more than ' + MAXMIN_LIMIT + ' uncertain variables.');
     const f = makeEvaluator(s);
     let max = { v: s.value, at: s.x.slice() }, min = { v: s.value, at: s.x.slice() };
     let failed = 0, cornerMax = -Infinity, cornerMin = Infinity;
@@ -552,7 +552,7 @@
     const warnings = [];
     if (failed) warnings.push(failed + ' of the combinations gave no real answer (e.g. square root of a negative).');
     if (unc.length && (s.value > cornerMax || s.value < cornerMin)) {
-      warnings.push('The result at your measured values lies outside the range of the extremes, so the equation peaks inside the range (e.g. sin near 90°). Max–min may be unreliable here.');
+      warnings.push('The result at your measured values lies outside the range of the extremes, so the equation peaks inside the range (e.g. sin near 90°). Max-min may be unreliable here.');
     }
     const sigma = (max.v - min.v) / 2;
     const label = (at) => s.variables.map((n, i) => ({ name: n, value: at[i], shift: Math.sign(at[i] - s.x[i]) }));

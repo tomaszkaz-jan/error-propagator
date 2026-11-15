@@ -46,6 +46,7 @@ Switch to **Table of readings** to run the same equation on many rows. Each vari
 - `tests/tests.js`: test cases with independently worked answers
 - `vendor/math.js`: math.js 12.4.2
 - `vendor/katex/`: KaTeX 0.16.11 (renders LaTeX)
+- `vendor/fonts/`: Geist and Geist Mono (SIL Open Font License, see `OFL-LICENSE.txt`)
 
 ## Tests
     ./tests/run.sh
@@ -58,4 +59,5 @@ Or open `tests.html` in a browser.
 - **v4** (done): saved sessions with backup/restore, units with dimension checking and unit conversion
 - **Hosted** on GitHub Pages
 - **v5**: straight-line fit and graph (LSFR method) in table mode
+- **v6**: design polish: Geist type, one consistent design system, light/dark/system theme, session actions in a menu, labelled inputs, example equations, keyboard focus and touch-size controls, WCAG AA contrast
 - **Later**: units checking, hosting on GitHub Pages

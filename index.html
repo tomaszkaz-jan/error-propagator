@@ -4,46 +4,71 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Error Propagator</title>
+  <meta name="description" content="Propagate measurement uncertainties for lab reports: partial derivatives, simple rules, max-min and a Monte Carlo check, with units, tables, straight-line fits and LaTeX output. Works offline.">
+  <meta name="theme-color" content="#f3f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1114" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Error Propagator">
+  <meta property="og:description" content="Uncertainty propagation, straight-line fits and LaTeX output for lab reports.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="vendor/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="vendor/katex/katex.min.css">
   <link rel="stylesheet" href="src/style.css">
+  <script>
+    // Apply a saved light/dark choice before the page draws, to avoid a flash.
+    try { var t = localStorage.getItem('errorprop.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
 </head>
 <body>
+  <a class="skip-link" href="#result">Skip to the result</a>
   <main>
-    <header>
-      <h1>Error Propagator</h1>
-      <p class="tagline">Type an equation, enter your measurements, get the result ± uncertainty.</p>
-      <div class="session-bar">
-        <label for="session-select" class="opt-label">Session</label>
-        <select id="session-select" aria-label="Saved session"></select>
-        <button type="button" class="ghost small" id="s-new">+ New</button>
-        <button type="button" class="ghost small" id="s-rename">Rename</button>
-        <button type="button" class="ghost small" id="s-dup">Duplicate</button>
-        <button type="button" class="ghost small" id="s-del">Delete</button>
-        <span class="spacer"></span>
-        <button type="button" class="ghost small" id="s-backup" title="Download all sessions as a file">Back up</button>
-        <label class="button ghost small" title="Load sessions from a backup file">Restore<input type="file" id="s-restore-file" accept=".json,application/json" hidden></label>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">±</div>
+        <div>
+          <h1>Error Propagator</h1>
+          <p class="tagline">Type an equation, enter your measurements, get the result ± uncertainty.</p>
+        </div>
       </div>
-      <p id="session-note" class="session-note"></p>
-      <div class="seg mode-switch" role="group" aria-label="Mode">
-        <button type="button" data-mode="single">Single calculation</button>
-        <button type="button" data-mode="table">Table of readings</button>
+      <div class="session-area">
+      <nav class="session-bar" aria-label="Saved sessions">
+        <select id="session-select" aria-label="Saved session"></select>
+        <button type="button" class="small" id="s-new">New session</button>
+        <details class="menu" id="s-menu">
+          <summary class="button small" aria-label="More session actions">More</summary>
+          <div class="menu-list">
+            <button type="button" id="s-rename">Rename</button>
+            <button type="button" id="s-dup">Duplicate</button>
+            <hr>
+            <button type="button" id="s-backup" title="Download all sessions as a file">Back up all sessions</button>
+            <label class="button" title="Load sessions from a backup file">Restore from backup<input type="file" id="s-restore-file" accept=".json,application/json" hidden></label>
+            <hr>
+            <button type="button" id="s-del" class="danger">Delete session</button>
+          </div>
+        </details>
+      </nav>
+      <p id="session-note" class="session-note" aria-live="polite"></p>
       </div>
     </header>
 
-    <section class="card">
-      <label for="eq" class="label">Equation</label>
+    <div class="seg mode-switch" role="group" aria-label="Mode">
+      <button type="button" data-mode="single">Single calculation</button>
+      <button type="button" data-mode="table">Table of readings</button>
+    </div>
+
+    <section class="card" aria-labelledby="eq-label">
+      <label for="eq" class="label" id="eq-label">Equation</label>
       <div class="eq-row">
         <input id="eq" class="mono" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
-               placeholder="g = 4*pi^2*L/T^2">
-        <button id="example" class="ghost" type="button">Example</button>
+               placeholder="g = 4*pi^2*L/T^2" aria-describedby="eq-help">
+        <button id="example" type="button">Example</button>
       </div>
       <div id="eq-preview" aria-label="Equation preview"></div>
-      <details class="help">
+      <details class="help" id="eq-help">
         <summary>What can I type?</summary>
         <ul>
           <li><code>+ - * / ^</code> and brackets. Put <code>*</code> between variables: <code>m*v</code>, not <code>mv</code> (that's one variable called mv).</li>
           <li><code>sqrt(x)</code>, <code>ln(x)</code> or <code>log(x)</code> (natural log), <code>log10(x)</code>, <code>exp(x)</code>, <code>abs(x)</code></li>
-          <li><code>sin cos tan</code>, <code>asin acos atan</code>. Choose degrees or radians below.</li>
+          <li><code>sin cos tan</code>, <code>asin acos atan</code>. Choose degrees or radians in the settings.</li>
           <li>Constants: <code>pi</code> and <code>e</code>. Any other name is a variable, so <code>E</code>, <code>c</code>, <code>phi</code> are fine. Greek names like <code>theta</code> show as symbols, and <code>v_max</code> gives a subscript.</li>
           <li>Numbers like <code>6.67e-11</code> or <code>6.67x10^-11</code>. A constant you know exactly can be a variable with uncertainty 0.</li>
           <li>Units (optional), typed in each variable's unit box: <code>m cm mm um nm</code>, <code>s ms min h</code>, <code>kg g</code>, <code>N J W Pa</code>, <code>V A ohm C F T</code>, <code>Hz</code>, <code>K degC</code>, <code>deg rad</code>, and combinations like <code>m/s^2</code> or <code>kg m^2</code>.</li>
@@ -51,35 +76,35 @@
       </details>
     </section>
 
-    <section class="card" id="single-card">
-      <div class="label">Measured variables</div>
+    <section class="card" id="single-card" aria-labelledby="vars-label">
+      <h2 class="label" id="vars-label">Measured variables</h2>
       <div id="vars"><p class="empty">Your variables will appear here once you type an equation.</p></div>
     </section>
 
-    <section class="card" id="table-card" hidden>
-      <div class="label">Readings</div>
+    <section class="card" id="table-card" aria-labelledby="table-label" hidden>
+      <h2 class="label" id="table-label">Readings</h2>
       <div id="table-box"><p class="empty">Your columns will appear here once you type an equation.</p></div>
     </section>
 
-    <section class="card options">
+    <section class="card options" aria-label="Settings">
       <div class="opt">
-        <span class="opt-label">Method</span>
-        <div class="seg" role="group" aria-label="Method">
+        <span class="opt-label" id="method-label">Method</span>
+        <div class="seg" role="group" aria-labelledby="method-label" aria-label="Method">
           <button type="button" data-method="partial">Partial derivatives</button>
           <button type="button" data-method="rules">Simple rules</button>
-          <button type="button" data-method="maxmin">Max–min</button>
+          <button type="button" data-method="maxmin">Max-min</button>
         </div>
       </div>
       <div class="opt">
-        <span class="opt-label">Angles</span>
-        <div class="seg" role="group" aria-label="Angle units">
+        <span class="opt-label" id="angles-label">Angles</span>
+        <div class="seg" role="group" aria-labelledby="angles-label" aria-label="Angle units">
           <button type="button" data-deg="0">Radians</button>
           <button type="button" data-deg="1">Degrees</button>
         </div>
       </div>
       <div class="opt">
         <label class="opt-label" for="result-unit">Result unit</label>
-        <input id="result-unit" class="unit wide" type="text" placeholder="automatic (SI)" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <input id="result-unit" class="unit wide" type="text" placeholder="auto (SI)" autocomplete="off" autocapitalize="off" spellcheck="false">
       </div>
       <div class="opt">
         <label class="opt-label" for="round">Round uncertainty to</label>
@@ -91,9 +116,21 @@
       </div>
     </section>
 
-    <section class="card" id="result" aria-live="polite"></section>
+    <section class="card" id="result" aria-live="polite" tabindex="-1"></section>
 
-    <footer>Assumes the measured variables are independent. Works offline.</footer>
+    <footer class="site-footer">
+      <span>Assumes the measured variables are independent. Works offline.</span>
+      <span>
+        <label>Theme
+          <select id="theme" aria-label="Colour theme">
+            <option value="">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        &nbsp;·&nbsp; <a href="https://github.com/tomaszkaz-jan/error-propagator">Source on GitHub</a>
+      </span>
+    </footer>
   </main>
 
   <script src="vendor/katex/katex.min.js"></script>
