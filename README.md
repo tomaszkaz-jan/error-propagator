@@ -13,6 +13,9 @@ Double-click `index.html` to open it in a browser. It works offline because math
 
 All maths is rendered in LaTeX (KaTeX), and the result and the full working can be copied as LaTeX.
 
+## Table of readings
+Switch to **Table of readings** to run the same equation on many rows. Each variable's uncertainty can be the same for every row or different for each row. You can paste cells straight from Excel or Google Sheets, and Enter moves down a row. Each row gets its own result and Monte Carlo check. A summary gives the mean ± standard error, the standard deviation and the weighted mean, and warns when the results scatter more than their uncertainties suggest (reduced χ²). Click a row number to see that row's working. Use **Export CSV** to save the table, or **Copy as LaTeX table** for your report.
+
 ## Files
 - `src/propagate.js`: the maths engine (parsing, derivatives, rounding)
 - `src/app.js`, `src/style.css`, `index.html`: the interface
@@ -27,5 +30,6 @@ Or open `tests.html` in a browser.
 ## Roadmap
 - **v1** (done): single calculation, partial-derivative method, contribution breakdown, working
 - **v2** (done): simple-rules and max–min methods, Monte Carlo cross-check, LaTeX everywhere and LaTeX copy
-- **v3**: table mode (paste readings from Excel), CSV export, saved sessions
+- **v3** (done): table mode built into the app, paste from Excel, per-row Monte Carlo, summary statistics, CSV export, LaTeX table
+- **Next**: named saved sessions (e.g. one per lab)
 - **Later**: units checking, hosting on GitHub Pages

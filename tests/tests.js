@@ -251,6 +251,28 @@
     same(EP.numTex(6.674e-11), '6.674\\times10^{-11}');
   });
 
+  // ----- Tables -----
+  test('summary: mean, sd, standard error', () => {
+    const s = EP.summarize([9.6, 9.8, 10.0, 9.9, 9.7]);
+    near(s.mean, 9.8); near(s.sd, Math.sqrt(0.1 / 4)); near(s.sem, Math.sqrt(0.1 / 4) / Math.sqrt(5));
+  });
+  test('summary: weighted mean', () => {
+    const s = EP.summarize([10, 12], [1, 2]); // weights 1 and 1/4
+    near(s.wmean, (10 + 12 / 4) / 1.25); near(s.wsigma, 1 / Math.sqrt(1.25));
+    near(s.chi2red, (1 * (10 - s.wmean) ** 2 + 0.25 * (12 - s.wmean) ** 2) / 1);
+  });
+  test('summary: no weighted mean if a sigma is 0', () => same(isNaN(EP.summarize([1, 2], [0.1, 0]).wmean), true));
+  test('summary: single value', () => { const s = EP.summarize([5]); near(s.mean, 5); same(isNaN(s.sem), true); });
+  test('csv: quoting', () => same(EP.toCsv([['a', 'b,c'], ['say "hi"', 1.5]]), 'a,"b,c"\r\n"say ""hi""",1.5\r\n'));
+  test('paste: tab separated with trailing newline', () =>
+    same(EP.parseGrid('0.5\t1.42\r\n0.6\t1.55\r\n'), [['0.5', '1.42'], ['0.6', '1.55']]));
+  test('paste: single column', () => same(EP.parseGrid('1\n2\n3'), [['1'], ['2'], ['3']]));
+  test('cache: same equation different values', () => {
+    near(calc('x^2', [v('x', 2, 0.1)]).sigma, 0.4);
+    near(calc('x^2', [v('x', 3, 0.1)]).sigma, 0.6);
+    near(calc('x^2', [v('x', 3, 0.1)], { degrees: true }).sigma, 0.6);
+  });
+
   root.runTests = function () {
     return cases.map((c) => {
       try { c.fn(); return { name: c.name, ok: true }; }

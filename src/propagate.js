@@ -125,12 +125,36 @@
     });
   }
 
+  // Parsed equations are cached so a table of many rows only parses and
+  // differentiates the equation once. Cached objects are never modified.
+  const prepCache = new Map();
+
   function prepare(text, opts) {
+    const degrees = !!(opts && opts.degrees);
+    const key = degrees + '|' + text;
+    if (prepCache.has(key)) return prepCache.get(key);
     const { name, expr } = splitEquation(text);
     const raw = parseExpr(expr);
-    const node = rewrite(raw, !!(opts && opts.degrees));
+    const node = rewrite(raw, degrees);
     const counts = countVariables(raw);
-    return { name, raw, node, counts, variables: [...counts.keys()] };
+    const p = { name, raw, node, counts, variables: [...counts.keys()], derivs: new Map() };
+    if (prepCache.size > 50) prepCache.clear();
+    prepCache.set(key, p);
+    return p;
+  }
+
+  // d(equation)/d(variable), worked out once per equation and cached.
+  function derivativeOf(p, n) {
+    if (!p.derivs.has(n)) {
+      let d;
+      try {
+        d = math.derivative(p.node, n);
+      } catch (err) {
+        throw new InputError("Couldn't differentiate with respect to " + n + ': ' + err.message);
+      }
+      p.derivs.set(n, { node: d, code: d.compile(), str: d.toString(), tex: toTex(d) });
+    }
+    return p.derivs.get(n);
   }
 
   /** The variable names used in an equation (for building the input rows). */
@@ -258,7 +282,7 @@
     }
     if (!isFinite(value)) throw new InputError('The result is infinite or undefined (division by zero?).');
 
-    return Object.assign(p, { x, sig, scope, value });
+    return Object.assign({}, p, { x, sig, scope, value }); // copy: p is cached
   }
 
   // ---------- Method 1: partial derivatives ----------
@@ -273,15 +297,10 @@
     const warnings = [];
     const terms = s.variables.map((n, i) => {
       const sigma = s.sig[i];
-      let deriv;
-      try {
-        deriv = math.derivative(s.node, n);
-      } catch (err) {
-        throw new InputError("Couldn't differentiate with respect to " + n + ': ' + err.message);
-      }
+      const deriv = derivativeOf(s, n);
       let dv;
       try {
-        dv = toReal(deriv.evaluate(s.scope), 'The derivative with respect to ' + n);
+        dv = toReal(deriv.code.evaluate(s.scope), 'The derivative with respect to ' + n);
       } catch (err) {
         dv = NaN;
       }
@@ -294,7 +313,7 @@
       const term = sigma === 0 ? 0 : dv * sigma;
       return {
         name: n, value: s.x[i], sigma, term,
-        derivative: deriv.toString(), derivTex: toTex(deriv), derivValue: dv,
+        derivative: deriv.str, derivTex: deriv.tex, derivValue: dv,
       };
     });
 
@@ -533,7 +552,49 @@
     return { sci: false, value: v, sigma: s, exp: 0, text: v + ' ± ' + s, tex: v + ' \\pm ' + s };
   }
 
+  // ---------- Tables: summary, CSV, pasted data ----------
+
+  /**
+   * Summary of a column of results with uncertainties.
+   * mean ± standard error, and the weighted mean (weights 1/sigma^2) ± 1/sqrt(sum of weights).
+   * chi2red > ~2 means the results scatter more than their uncertainties suggest.
+   */
+  function summarize(values, sigmas) {
+    const n = values.length;
+    if (!n) return null;
+    const mean = values.reduce((a, b) => a + b, 0) / n;
+    const sd = n > 1 ? Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / (n - 1)) : NaN;
+    const out = { n, mean, sd, sem: n > 1 ? sd / Math.sqrt(n) : NaN, wmean: NaN, wsigma: NaN, chi2red: NaN };
+    if (sigmas && sigmas.length === n && sigmas.every((s) => s > 0 && isFinite(s))) {
+      const w = sigmas.map((s) => 1 / (s * s));
+      const sw = w.reduce((a, b) => a + b, 0);
+      out.wmean = values.reduce((a, v, i) => a + w[i] * v, 0) / sw;
+      out.wsigma = 1 / Math.sqrt(sw);
+      if (n > 1) out.chi2red = values.reduce((a, v, i) => a + w[i] * (v - out.wmean) ** 2, 0) / (n - 1);
+    }
+    return out;
+  }
+
+  /** 2D array -> CSV text (quotes cells containing commas, quotes or newlines). */
+  function toCsv(rows) {
+    const cell = (c) => {
+      const s = c == null ? '' : String(c);
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  }
+
+  /** Text pasted from Excel / Google Sheets / Numbers (tab-separated) -> 2D array. */
+  function parseGrid(text) {
+    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+    return lines.map((l) => l.split('\t').map((c) => c.trim()));
+  }
+
   root.ErrorProp = {
+    summarize,
+    toCsv,
+    parseGrid,
     calculate,
     simpleRules,
     maxMin,
