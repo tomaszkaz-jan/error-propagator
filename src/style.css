@@ -454,3 +454,69 @@ button.chip { white-space: normal; text-align: left; min-height: 32px; height: a
 @media (max-width: 640px) {
   .reps { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- v8: settings panel, tabs, symbol keys, undo bar, print ---------- */
+details.settings { padding: 0; }
+details.settings > summary {
+  display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; cursor: pointer;
+  padding: 12px 20px; list-style: none; border-radius: var(--r-box);
+}
+details.settings > summary::-webkit-details-marker { display: none; }
+details.settings > summary::before {
+  content: ""; width: 7px; height: 7px; flex: none; margin-right: 2px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg); transition: transform 150ms var(--ease);
+}
+details.settings[open] > summary::before { transform: rotate(45deg); }
+details.settings > summary:hover .settings-title { color: var(--accent); }
+.settings-title { font-weight: 600; }
+.settings-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font-size: 0.8rem; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-tag); padding: 1px 8px; }
+details.settings > .options { padding: 6px 20px 20px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+.tabs { margin-bottom: 18px; }
+.tabs button.on { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.tab-panel > .graph-section, .tab-panel > .detail { margin-top: 0; padding-top: 0; border-top: 0; }
+
+.keys { display: none; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.keys button { min-width: 0; padding: 0; font-family: var(--mono); font-size: 1rem; }
+@media (pointer: coarse) { .keys { display: grid; } }
+
+.toast {
+  position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px; z-index: 20;
+  max-width: calc(100vw - 24px); padding: 10px 12px 10px 16px;
+  background: var(--text); color: var(--bg); border-radius: 10px; box-shadow: var(--menu-shadow); font-size: 0.92rem;
+}
+.toast button { background: transparent; color: inherit; border-color: currentColor; }
+.toast button:hover { background: rgb(128 128 128 / 0.25); }
+
+@media (max-width: 640px) {
+  details.settings > summary { padding: 12px 14px; }
+  details.settings > .options { padding: 14px 14px 16px; }
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .tabs button { padding: 4px; font-size: 0.86rem; white-space: normal; line-height: 1.2; }
+}
+
+@media print {
+  :root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
+    --bg: #ffffff; --surface: #ffffff; --surface-2: #ffffff; --text: #000000; --muted: #444444;
+    --line: #cccccc; --line-strong: #999999; --accent: #1f4fa8; --on-accent: #ffffff; --accent-soft: #eef2fa;
+    --bad: #a02018; --bad-soft: #ffffff; --warn: #6b4500; --warn-soft: #ffffff; --good: #14622c; --good-soft: #ffffff;
+    --fit: #d62728; --shadow: none; color-scheme: light;
+  }
+  body { font-size: 11pt; }
+  main { max-width: none; padding: 0; }
+  .session-area, .mode-switch, .help, .keys, .buttons, .table-actions, .site-footer, .skip-link, .toast,
+  .tabs, .chips, .examples, .rep-btn, button.del, .graph-controls, .hint, .logo, .tagline, .cfg-extra { display: none !important; }
+  .card { border: 0; box-shadow: none; padding: 0; margin-bottom: 14pt; }
+  .tab-panel[hidden] { display: block !important; }
+  .tab-panel + .tab-panel { margin-top: 16pt; padding-top: 10pt; border-top: 1px solid var(--line); }
+  details.settings > summary { padding: 0; }
+  details.settings > summary::before { display: none; }
+  details.settings > .options { display: none; }
+  input, select, textarea { border-color: var(--line); background: #fff; }
+  .warn, .check { border: 1px solid var(--line); border-left-width: 3px; }
+  .plot, .working, .answer, .compare-box, table.grid tr, .fit-results { break-inside: avoid; }
+  h3 { break-after: avoid; }
+}

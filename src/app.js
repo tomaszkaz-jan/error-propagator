@@ -52,6 +52,7 @@
     });
     while (out.table.rows.length < START_ROWS) out.table.rows.push({});
     out.table.selected = Math.max(0, Math.min(Number(t.selected) || 0, out.table.rows.length - 1));
+    out.table.tab = ['summary', 'graph', 'row'].includes(t.tab) ? t.tab : 'summary';
     const gr = t.graph && typeof t.graph === 'object' ? t.graph : {};
     const axis = (a, def) => (typeof a === 'string' && /^(result|custom|var:[A-Za-z_][A-Za-z0-9_]{0,39})$/.test(a) ? a : def);
     out.table.graph = {
@@ -200,9 +201,35 @@
     return u;
   }
 
+  // ---------- undo bar (for clearing readings, deleting rows and sessions) ----------
+  let toastTimer = null;
+  function dismissToast() {
+    clearTimeout(toastTimer);
+    const t = document.querySelector('.toast');
+    if (t) t.remove();
+  }
+  function undoable(text, undo) {
+    dismissToast();
+    const b = el('button', { type: 'button', class: 'small' }, 'Undo');
+    const t = el('div', { class: 'toast', role: 'status' }, el('span', null, text), b);
+    b.addEventListener('click', () => { dismissToast(); undo(); });
+    document.body.append(t);
+    toastTimer = setTimeout(dismissToast, 8000);
+  }
+
+  // The collapsed settings card shows the current choices in one line.
+  function settingsSummary() {
+    const bits = [METHODS[state.method].label, state.degrees ? 'Degrees' : 'Radians'];
+    if (!blank(state.resultUnit)) bits.push('Result in ' + state.resultUnit.trim());
+    if (!blank(state.accepted)) bits.push('Accepted value ' + state.accepted.trim());
+    if (state.rounding !== 'auto') bits.push(state.rounding + ' s.f.');
+    $('settings-summary').replaceChildren(...bits.map((b) => el('span', { class: 'tag' }, b)));
+  }
+
   // ================= main update =================
   function update() {
     save();
+    settingsSummary();
     token++;
     clearTimeout(detailTimer); clearTimeout(rowMcTimer);
     try {
@@ -285,6 +312,7 @@
     });
     state.table.selected = 0;
     Object.assign(state.table.graph, { x: '', y: '', xExpr: '', yExpr: '', derived: '', derivedAccepted: '', xErrors: false, origin: false, title: '' }, ex.graph);
+    state.table.tab = ex.graph.derived ? 'graph' : 'summary';
     applyControls();
     builtFor = '';
     update();
@@ -717,11 +745,14 @@
       const res = el('td', { class: 'res' }), chk = el('td', { class: 'chk' });
       const del = el('button', { type: 'button', class: 'del', title: 'Delete row ' + (r + 1), 'aria-label': 'Delete row ' + (r + 1) }, '×');
       del.addEventListener('click', () => {
+        const before = JSON.stringify(state.table.rows), sel = state.table.selected;
+        const hadData = Object.values(row).some((c) => c && (!blank(c.value) || !blank(c.unc)));
         state.table.rows.splice(r, 1);
         if (!state.table.rows.length) state.table.rows.push({});
         state.table.selected = Math.min(state.table.selected, state.table.rows.length - 1);
         builtFor = '';
         update();
+        if (hadData) undoable(`Row ${r + 1} deleted.`, () => { state.table.rows = JSON.parse(before); state.table.selected = sel; builtFor = ''; update(); });
       });
       tr.append(res, chk, el('td', null, del));
       body.append(tr);
@@ -736,18 +767,15 @@
     add.addEventListener('click', () => { state.table.rows.push({}); update(); focusCell(state.table.rows.length - 1, 0); });
     const clear = el('button', { type: 'button', class: 'ghost small' }, 'Clear readings');
     clear.addEventListener('click', () => {
-      if (clear.dataset.armed) {
-        state.table.rows = Array.from({ length: START_ROWS }, () => ({}));
-        state.table.selected = 0;
-        builtFor = '';
-        update();
-      } else {
-        clear.dataset.armed = '1'; clear.textContent = 'Click again to clear';
-        setTimeout(() => { delete clear.dataset.armed; clear.textContent = 'Clear readings'; }, 3000);
-      }
+      const before = JSON.stringify(state.table.rows), sel = state.table.selected;
+      state.table.rows = Array.from({ length: START_ROWS }, () => ({}));
+      state.table.selected = 0;
+      builtFor = '';
+      update();
+      undoable('Readings cleared.', () => { state.table.rows = JSON.parse(before); state.table.selected = sel; builtFor = ''; update(); });
     });
     tableBox.append(el('div', { class: 'table-actions' }, add, clear,
-      el('span', { class: 'hint' }, 'Tip: copy cells from Excel and paste them into any cell. Enter moves down.')));
+      el('span', { class: 'hint' }, 'Tip: copy cells from Excel and paste them into any cell. Enter and the arrow keys move between cells.')));
   }
 
   // After a rebuild, put the cursor back in the unit box being typed in.
@@ -768,11 +796,26 @@
 
   function onGridKey(e) {
     const t = e.target;
-    if (e.key !== 'Enter' || t.dataset.r == null) return;
-    e.preventDefault();
+    if (t.dataset.r == null || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const r = Number(t.dataset.r), c = Number(t.dataset.c);
-    if (r + 1 >= state.table.rows.length) { state.table.rows.push({}); update(); }
-    focusCell(r + 1, c);
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (r + 1 >= state.table.rows.length) { state.table.rows.push({}); update(); }
+      focusCell(r + 1, c);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const to = r + (e.key === 'ArrowDown' ? 1 : -1);
+      if (to < 0 || to >= state.table.rows.length) return;
+      e.preventDefault();
+      focusCell(to, c);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      // only leave the cell when the cursor is already at its edge
+      const atStart = t.selectionStart === 0 && t.selectionEnd === 0;
+      const atEnd = t.selectionStart === t.value.length && t.selectionEnd === t.value.length;
+      const to = c + (e.key === 'ArrowRight' ? 1 : -1);
+      if ((e.key === 'ArrowLeft' ? !atStart : !atEnd) || !tableBox.querySelector(`input[data-r="${r}"][data-c="${to}"]`)) return;
+      e.preventDefault();
+      focusCell(r, to);
+    }
   }
 
   // Paste a block of cells from a spreadsheet, starting at the cell pasted into.
@@ -782,7 +825,10 @@
     const text = (e.clipboardData || window.clipboardData).getData('text');
     if (!/[\t\n]/.test(text.trim())) return; // a single value: normal paste
     e.preventDefault();
-    const grid = EP.parseGrid(text);
+    let grid = EP.parseGrid(text);
+    // A first line with no numbers in it (e.g. "L (cm)  T (s)") is a header: skip it.
+    const isHeader = (line) => line.some((v) => !blank(v)) && line.every((v) => blank(v) || isNaN(EP.parseNumber(v)));
+    if (grid.length > 1 && isHeader(grid[0]) && !isHeader(grid[1])) grid = grid.slice(1);
     const cols = editCols();
     const r0 = Number(t.dataset.r), c0 = Number(t.dataset.c);
     grid.slice(0, 2000).forEach((line, i) => {
@@ -802,7 +848,7 @@
     state.table.selected = r;
     rowCells.forEach((c, i) => c.tr.classList.toggle('sel', i === r));
     if (keepFocus) { save(); token++; clearTimeout(detailTimer); renderDetail(); scheduleRowChecks(); }
-    else update();
+    else { state.table.tab = 'row'; update(); }
   }
 
   // Row r -> the values to calculate with.
@@ -885,11 +931,35 @@
     if (s.chi2red > 2 && s.n >= 3) {
       parts.push(el('div', { class: 'warn' }, `If every row measures the same quantity: the results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}), so there may be a systematic error or underestimated uncertainties, and the plain mean ± standard error is the safer one to quote. (If the rows are meant to change, e.g. points for a graph, ignore this and use the straight-line fit below.)`));
     }
-    parts.push(graphSection());
-    parts.push(el('div', { class: 'detail', id: 'detail' }));
-    resultBox.replaceChildren(...parts);
+    const tab = state.table.tab;
+    const panel = (id, kids) => el('div', { class: 'tab-panel', 'data-panel': id, role: 'tabpanel', hidden: tab !== id }, kids);
+    resultBox.replaceChildren(tabBar(),
+      panel('summary', parts), panel('graph', graphSection()), panel('row', el('div', { class: 'detail', id: 'detail' })));
     renderGraph();
     renderDetail();
+  }
+
+  // Summary | Graph and fit | Row working
+  function tabBar() {
+    const bar = el('div', { class: 'seg tabs', role: 'tablist', 'aria-label': 'Results' });
+    [['summary', 'Summary'], ['graph', 'Graph and fit'], ['row', 'Row working']].forEach(([id, label]) => {
+      const on = state.table.tab === id;
+      const b = el('button', { type: 'button', role: 'tab', 'data-tab': id, 'aria-selected': String(on), class: on ? 'on' : '' }, label);
+      b.addEventListener('click', () => showTab(id));
+      bar.append(b);
+    });
+    return bar;
+  }
+  function showTab(id) {
+    state.table.tab = id;
+    save();
+    resultBox.querySelectorAll('[data-tab]').forEach((b) => {
+      const on = b.dataset.tab === id;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+    resultBox.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== id; });
+    if (id === 'graph') renderGraph(); // redraw at the real width now it is visible
   }
 
   // ================= straight-line fit and graph (LSFR method) =================
@@ -1355,6 +1425,7 @@
 
   function switchSession(id) {
     if (!store.sessions[id]) return;
+    dismissToast();
     store.active = id;
     const fresh = cleanData(store.sessions[id].data);
     Object.keys(state).forEach((k) => delete state[k]);
@@ -1420,21 +1491,20 @@
     const id = addSession(store.sessions[store.active].name + ' (copy)', JSON.parse(JSON.stringify(state)));
     switchSession(id);
   });
-  const delBtn = $('s-del');
-  delBtn.addEventListener('click', () => {
-    if (!delBtn.dataset.armed) {
-      delBtn.dataset.armed = '1';
-      delBtn.textContent = 'Click again to delete';
-      setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete session'; }, 3000);
-      return;
-    }
-    delete delBtn.dataset.armed; delBtn.textContent = 'Delete session';
+  $('s-del').addEventListener('click', () => {
     closeMenu();
-    const gone = store.sessions[store.active].name;
-    delete store.sessions[store.active];
+    save();
+    const id = store.active, gone = store.sessions[id];
+    delete store.sessions[id];
     const ids = Object.keys(store.sessions);
-    switchSession(ids.length ? ids[0] : addSession('My first session', {}));
-    savedLabel(`Deleted “${gone}”`);
+    const placeholder = ids.length ? null : addSession('My first session', {});
+    switchSession(placeholder || ids[0]);
+    undoable(`Deleted “${gone.name}”.`, () => {
+      store.sessions[id] = gone;
+      // the stand-in made for the last session goes away again if it was never used
+      if (placeholder && store.sessions[placeholder] && blank(store.sessions[placeholder].data.equation)) delete store.sessions[placeholder];
+      switchSession(id);
+    });
   });
   $('s-backup').addEventListener('click', () => {
     closeMenu();
@@ -1525,6 +1595,25 @@
   roundSel.addEventListener('change', () => { state.rounding = roundSel.value; update(); });
   resultUnitInput.addEventListener('input', () => { state.resultUnit = resultUnitInput.value; markUnit(resultUnitInput); update(); });
   eqInput.addEventListener('input', () => { state.equation = eqInput.value; builtFor = ''; update(); });
+  // Symbol keys under the equation box (shown on touch screens): insert at the cursor.
+  $('eq-keys').addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('button[data-ins]');
+    if (!b) return;
+    e.preventDefault(); // keep the keyboard open and the cursor in place
+    const start = eqInput.selectionStart == null ? eqInput.value.length : eqInput.selectionStart;
+    const end = eqInput.selectionEnd == null ? start : eqInput.selectionEnd;
+    eqInput.setRangeText(b.dataset.ins, start, end, 'end');
+    eqInput.focus();
+    eqInput.dispatchEvent(new Event('input'));
+  });
+
+  const settings = $('settings');
+  try { settings.open = localStorage.getItem('errorprop.settingsOpen') === '1'; } catch (e) { /* storage blocked */ }
+  settings.addEventListener('toggle', () => {
+    try { localStorage.setItem('errorprop.settingsOpen', settings.open ? '1' : '0'); } catch (e) { /* ignore */ }
+  });
+  $('print').addEventListener('click', () => window.print());
+
   const accInput = $('accepted'), accUncInput = $('accepted-unc');
   accInput.addEventListener('input', () => { state.accepted = accInput.value; mark(accInput); update(); });
   accUncInput.addEventListener('input', () => { state.acceptedUnc = accUncInput.value; mark(accUncInput); update(); });

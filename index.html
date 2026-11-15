@@ -61,6 +61,16 @@
         <input id="eq" class="mono" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
                placeholder="g = 4*pi^2*L/T^2" aria-describedby="eq-help">
       </div>
+      <div class="keys" id="eq-keys" role="group" aria-label="Insert a symbol">
+        <button type="button" data-ins="^" aria-label="power">^</button>
+        <button type="button" data-ins="*" aria-label="times">*</button>
+        <button type="button" data-ins="/" aria-label="divide">/</button>
+        <button type="button" data-ins="(" aria-label="open bracket">(</button>
+        <button type="button" data-ins=")" aria-label="close bracket">)</button>
+        <button type="button" data-ins="_" aria-label="subscript">_</button>
+        <button type="button" data-ins="pi" aria-label="pi">π</button>
+        <button type="button" data-ins="sqrt(" aria-label="square root">√</button>
+      </div>
       <div id="eq-preview" aria-label="Equation preview"></div>
       <details class="help" id="eq-help">
         <summary>What can I type?</summary>
@@ -87,7 +97,9 @@
       <div id="table-box"><p class="empty">Your columns will appear here once you type an equation.</p></div>
     </section>
 
-    <section class="card options" aria-label="Settings">
+    <details class="card settings" id="settings">
+      <summary><span class="settings-title">Settings</span><span id="settings-summary" class="settings-summary"></span></summary>
+      <div class="options">
       <div class="opt">
         <span class="opt-label" id="method-label">Method</span>
         <div class="seg" role="group" aria-labelledby="method-label" aria-label="Method">
@@ -122,13 +134,16 @@
           <option value="2">2 s.f.</option>
         </select>
       </div>
-    </section>
+    </div>
+    </details>
 
     <section class="card" id="result" aria-live="polite" tabindex="-1"></section>
 
     <footer class="site-footer">
       <span>Assumes the measured variables are independent. Works offline.</span>
       <span>
+        <button type="button" class="small" id="print">Print or save as PDF</button>
+        &nbsp;·&nbsp;
         <label>Theme
           <select id="theme" aria-label="Colour theme">
             <option value="">System</option>

@@ -66,6 +66,7 @@ Or open `tests.html` in a browser.
 - **v4** (done): saved sessions with backup/restore, units with dimension checking and unit conversion
 - **Hosted** on GitHub Pages
 - **v5**: straight-line fit and graph (LSFR method) in table mode
+- **v8**: layout: settings collapse to one line so the result sits under the inputs, table results in tabs (Summary, Graph and fit, Row working), symbol keys on touch screens, arrow keys and header-row detection in the table, Undo for clearing readings and deleting rows or sessions, print layout
 - **v7**: accepted-value comparison, calculate from the fit, repeated readings, constants, fixed table columns; fixes for phone keyboards, the Example button and graph defaults
 - **v6**: design polish: Geist type, one consistent design system, light/dark/system theme, session actions in a menu, labelled inputs, example equations, keyboard focus and touch-size controls, WCAG AA contrast
 - **Later**: units checking, hosting on GitHub Pages
