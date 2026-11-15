@@ -447,9 +447,17 @@
       };
     });
 
-    const variance = terms.reduce((sum, t) => sum + t.term * t.term, 0);
-    const sigma = Math.sqrt(variance);
-    terms.forEach((t) => (t.share = variance > 0 && isFinite(variance) ? (t.term * t.term) / variance : 0));
+    const squares = terms.reduce((sum, t) => sum + t.term * t.term, 0);
+    // Correlated pairs (e.g. the slope and intercept of one fit) add 2*rho*term_a*term_b.
+    let variance = squares;
+    const byTerm = {};
+    terms.forEach((t) => (byTerm[t.name] = t));
+    ((opts && opts.correlations) || []).forEach((k) => {
+      const a = byTerm[k.a], b = byTerm[k.b];
+      if (a && b && isFinite(k.rho)) variance += 2 * Math.max(-1, Math.min(1, k.rho)) * a.term * b.term;
+    });
+    const sigma = Math.sqrt(Math.max(0, variance));
+    terms.forEach((t) => (t.share = squares > 0 && isFinite(squares) ? (t.term * t.term) / squares : 0));
 
     return {
       method: 'partial', name: s.name, units: s.units, value: s.value, sigma,
@@ -700,7 +708,7 @@
     }
     if (origin) {
       if (!(Sxx > 0)) throw new InputError('Cannot fit a line through the origin: all x values are 0.');
-      return { m: Sxy / Sxx, c: 0, sm: 1 / Math.sqrt(Sxx), sc: 0 };
+      return { m: Sxy / Sxx, c: 0, sm: 1 / Math.sqrt(Sxx), sc: 0, cov: 0, rho: 0 };
     }
     const D = S * Sxx - Sx * Sx; // LSFR's "repeated_term"
     if (!(Math.abs(D) > 0) || !isFinite(D)) throw new InputError('Cannot fit a line: the x values are all the same.');
@@ -709,6 +717,8 @@
       c: (Sy * Sxx - Sx * Sxy) / D,
       sm: Math.sqrt(S / D),
       sc: Math.sqrt(Sxx / D),
+      cov: -Sx / D,                       // covariance of m and c
+      rho: -Sx / Math.sqrt(S * Sxx),      // their correlation coefficient
     };
   }
 
@@ -786,6 +796,60 @@
     return gammaQ(dof / 2, chi2 / 2);
   }
 
+  // ---------- Physical constants (CODATA 2018; "exact" ones have uncertainty 0) ----------
+
+  const PHYSICAL_CONSTANTS = {
+    g: { value: 9.80665, unc: 0, unit: 'm/s^2', label: 'standard gravity' },
+    c: { value: 299792458, unc: 0, unit: 'm/s', label: 'speed of light' },
+    h: { value: 6.62607015e-34, unc: 0, unit: 'J s', label: 'Planck constant' },
+    hbar: { value: 1.054571817e-34, unc: 0, unit: 'J s', label: 'reduced Planck constant' },
+    k_B: { value: 1.380649e-23, unc: 0, unit: 'J/K', label: 'Boltzmann constant' },
+    N_A: { value: 6.02214076e23, unc: 0, unit: 'mol^-1', label: 'Avogadro constant' },
+    R: { value: 8.314462618, unc: 0, unit: 'J/(mol K)', label: 'gas constant' },
+    G: { value: 6.6743e-11, unc: 1.5e-15, unit: 'm^3/(kg s^2)', label: 'gravitational constant' },
+    q_e: { value: 1.602176634e-19, unc: 0, unit: 'C', label: 'elementary charge' },
+    epsilon_0: { value: 8.8541878128e-12, unc: 1.3e-21, unit: 'F/m', label: 'electric constant' },
+    mu_0: { value: 1.25663706212e-6, unc: 1.9e-16, unit: 'N/A^2', label: 'magnetic constant' },
+    m_e: { value: 9.1093837015e-31, unc: 2.8e-40, unit: 'kg', label: 'electron mass' },
+    m_p: { value: 1.67262192369e-27, unc: 5.1e-37, unit: 'kg', label: 'proton mass' },
+  };
+
+  // ---------- Repeated readings and comparison with an accepted value ----------
+
+  /** "1.41 1.43, 1.40" or a pasted column -> numbers (NaN for anything unreadable). */
+  function parseReadings(text) {
+    let parts = String(text || '').trim().split(/[\s;]+/).filter(Boolean);
+    if (parts.length === 1 && parts[0].includes(',')) parts = parts[0].split(',').filter(Boolean);
+    return parts.map((t) => parseNumber(t.replace(/,$/, '')));
+  }
+
+  /**
+   * Mean of repeated readings. The uncertainty of the mean is the standard error
+   * s/sqrt(n), combined in quadrature with the instrument uncertainty if given.
+   */
+  function repeatStats(values, instrument) {
+    const n = values.length;
+    if (n < 2) throw new InputError('Enter at least 2 readings.');
+    if (values.some((v) => !isFinite(v))) throw new InputError('One of the readings is not a number.');
+    const inst = instrument || 0;
+    if (!(inst >= 0)) throw new InputError('The instrument uncertainty must not be negative.');
+    const mean = values.reduce((a, b) => a + b, 0) / n;
+    const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) * (v - mean), 0) / (n - 1));
+    const se = sd / Math.sqrt(n);
+    return { n, mean, sd, se, instrument: inst, sigma: Math.sqrt(se * se + inst * inst) };
+  }
+
+  /** How far a result is from an accepted value, in units of the combined uncertainty. */
+  function compare(value, sigma, accepted, acceptedSigma) {
+    const diff = value - accepted;
+    const combined = Math.sqrt((sigma || 0) ** 2 + (acceptedSigma || 0) ** 2);
+    return {
+      diff, combined,
+      nSigma: combined > 0 ? Math.abs(diff) / combined : NaN,
+      percent: accepted !== 0 ? (diff / Math.abs(accepted)) * 100 : NaN,
+    };
+  }
+
   // ---------- Tables: summary, CSV, pasted data ----------
 
   /**
@@ -826,6 +890,10 @@
   }
 
   root.ErrorProp = {
+    PHYSICAL_CONSTANTS,
+    parseReadings,
+    repeatStats,
+    compare,
     divideUnits,
     linearFit,
     chi2Prob,

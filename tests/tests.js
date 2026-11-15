@@ -417,6 +417,65 @@
     same(EP.divideUnits('', ''), null);
   });
 
+  // ----- Repeated readings, accepted value, constants, correlated fit parameters -----
+  test('repeats: mean and standard error', () => {
+    const r = EP.repeatStats([1.41, 1.43, 1.40, 1.44, 1.42]);
+    near(r.mean, 1.42); near(r.sd, Math.sqrt(0.001 / 4)); near(r.se, Math.sqrt(0.001 / 4) / Math.sqrt(5)); near(r.sigma, r.se);
+  });
+  test('repeats: instrument uncertainty added in quadrature', () => {
+    const r = EP.repeatStats([10, 12], 3); // sd = sqrt(2), se = 1
+    near(r.se, 1); near(r.sigma, Math.sqrt(10));
+  });
+  test('repeats: identical readings keep the instrument uncertainty', () => near(EP.repeatStats([5, 5, 5], 0.1).sigma, 0.1));
+  test('repeats: errors', () => {
+    throwsMsg(() => EP.repeatStats([1]), 'at least 2');
+    throwsMsg(() => EP.repeatStats([1, NaN]), 'not a number');
+  });
+  test('repeats: reading text', () => {
+    same(EP.parseReadings('1.41 1.43, 1.40;1.44\n1.42'), [1.41, 1.43, 1.40, 1.44, 1.42]);
+    same(EP.parseReadings('1.41,1.43,1.40'), [1.41, 1.43, 1.40]);
+    same(EP.parseReadings('1,41 1,43'), [1.41, 1.43]);
+    same(EP.parseReadings(''), []);
+  });
+  test('compare with accepted value', () => {
+    const k = EP.compare(9.79, 0.4, 9.81);
+    near(k.diff, -0.02); near(k.nSigma, 0.05); near(k.percent, (-0.02 / 9.81) * 100);
+    near(EP.compare(10, 3, 5, 4).nSigma, 1);            // combined sigma 5
+    same(isNaN(EP.compare(10, 0, 5).nSigma), true);
+  });
+  test('constants: every unit is understood and values are sane', () => {
+    Object.entries(EP.PHYSICAL_CONSTANTS).forEach(([n, k]) => {
+      if (!EP.isUnit(k.unit)) throw new Error('bad unit for ' + n + ': ' + k.unit);
+      if (!(k.value > 0) || !(k.unc >= 0)) throw new Error('bad value for ' + n);
+    });
+    const K = EP.PHYSICAL_CONSTANTS;
+    near(K.h.value / (2 * Math.PI) / K.hbar.value, 1);
+    if (Math.abs((K.k_B.value * K.N_A.value) / K.R.value - 1) > 1e-9) throw new Error('R != k_B N_A');
+    if (Math.abs(1 / (K.mu_0.value * K.epsilon_0.value * K.c.value ** 2) - 1) > 1e-9) throw new Error('mu0 eps0 c^2 != 1');
+  });
+  test('constants: usable with units', () => {
+    const K = EP.PHYSICAL_CONSTANTS.g;
+    const r = calc('W = m*g', [vu('m', 2, 0.1, 'kg'), vu('g', K.value, K.unc, K.unit)], { resultUnit: 'N' });
+    near(r.value, 19.6133); near(r.sigma, 0.980665);
+  });
+  test('fit: covariance of m and c', () => {
+    const x = [1, 2, 3, 4], sy = [0.1, 0.2, 0.1, 0.3], f = EP.linearFit(x, [2.1, 3.9, 6.2, 7.8], sy);
+    const w = sy.map((v) => 1 / (v * v)), S = w.reduce((a, b) => a + b), Sx = w.reduce((a, b, i) => a + b * x[i], 0), Sxx = w.reduce((a, b, i) => a + b * x[i] * x[i], 0);
+    near(f.cov, -Sx / (S * Sxx - Sx * Sx)); near(f.rho, f.cov / (f.sm * f.sc));
+  });
+  test('correlated m and c: value on the line at x0 has the textbook uncertainty', () => {
+    const x = [1, 2, 3, 4], sy = [0.1, 0.2, 0.1, 0.3], f = EP.linearFit(x, [2.1, 3.9, 6.2, 7.8], sy);
+    const w = sy.map((v) => 1 / (v * v)), S = w.reduce((a, b) => a + b), Sx = w.reduce((a, b, i) => a + b * x[i], 0), Sxx = w.reduce((a, b, i) => a + b * x[i] * x[i], 0);
+    const x0 = 2.5, want = Math.sqrt((Sxx - 2 * x0 * Sx + x0 * x0 * S) / (S * Sxx - Sx * Sx));
+    const vars = [v('m', f.m, f.sm), v('c', f.c, f.sc)];
+    near(calc('y0 = m*2.5 + c', vars, { correlations: [{ a: 'm', b: 'c', rho: f.rho }] }).sigma, want);
+    const naive = calc('y0 = m*2.5 + c', vars).sigma;
+    if (!(naive > want * 1.5)) throw new Error('ignoring the correlation should overestimate: ' + naive + ' vs ' + want);
+  });
+  test('correlation ignored when only one of the pair is used', () => {
+    near(calc('g = 4*pi^2/m', [v('m', 4, 0.1)], { correlations: [{ a: 'm', b: 'c', rho: -0.9 }] }).sigma, (Math.PI ** 2 / 4) * 0.1);
+  });
+
   root.runTests = function () {
     return cases.map((c) => {
       try { c.fn(); return { name: c.name, ok: true }; }

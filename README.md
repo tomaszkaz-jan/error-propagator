@@ -33,6 +33,13 @@ Two optional extras that LSFR doesn't have: include x error bars in the fit (eff
 
 You can export the graph as a high-resolution PNG (laid out like LSFR's figure), copy it as LaTeX (pgfplots), or copy the fit results as LaTeX. The fit is also included in the CSV.
 
+## Accepted values, repeats, constants
+- **Accepted value:** type one in the settings and the result is compared with it: the difference, the percentage difference, and how many σ apart they are, with the working in LaTeX. In table mode the mean is compared too.
+- **Repeated readings:** press **Repeats** beside a variable and enter several readings. The mean becomes the value and the standard error s/√n, combined in quadrature with the instrument uncertainty, becomes the uncertainty.
+- **Constants:** name a variable `g`, `c`, `h`, `hbar`, `k_B`, `N_A`, `R`, `G`, `q_e`, `epsilon_0`, `mu_0`, `m_e` or `m_p` and a button offers to fill in its CODATA 2018 value, uncertainty and unit.
+- **Same value in every row:** in table mode, tick this for a variable that doesn't change, and it leaves the grid.
+- **Calculate from the fit:** under the graph, use the slope `m` and intercept `c` in an equation such as `g = 4*pi^2/m`. The correlation between `m` and `c` is included.
+
 ## Saved sessions
 Each lab can be its own session: **+ New**, **Rename**, **Duplicate** and **Delete** (two clicks). Everything saves automatically in this browser. Sessions live in the browser you use (and depend on how you open the app), so use **Back up** to download them all as a file and **Restore** to load them elsewhere.
 
@@ -59,5 +66,6 @@ Or open `tests.html` in a browser.
 - **v4** (done): saved sessions with backup/restore, units with dimension checking and unit conversion
 - **Hosted** on GitHub Pages
 - **v5**: straight-line fit and graph (LSFR method) in table mode
+- **v7**: accepted-value comparison, calculate from the fit, repeated readings, constants, fixed table columns; fixes for phone keyboards, the Example button and graph defaults
 - **v6**: design polish: Geist type, one consistent design system, light/dark/system theme, session actions in a menu, labelled inputs, example equations, keyboard focus and touch-size controls, WCAG AA contrast
 - **Later**: units checking, hosting on GitHub Pages

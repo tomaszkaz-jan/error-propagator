@@ -30,16 +30,18 @@
       method: METHODS[d.method] ? d.method : 'partial',
       mode: d.mode === 'table' ? 'table' : 'single',
       resultUnit: str(d.resultUnit, 60),
+      accepted: str(d.accepted, 60),
+      acceptedUnc: str(d.acceptedUnc, 60),
       table: { cols: {}, rows: [], selected: 0 },
     };
     const name = (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && k.length <= 40;
     const type = (t) => (t === 'pct' ? 'pct' : 'abs');
     Object.entries(d.vars && typeof d.vars === 'object' ? d.vars : {}).forEach(([k, v]) => {
-      if (name(k) && v && typeof v === 'object') out.vars[k] = { value: str(v.value, 60), unc: str(v.unc, 60), type: type(v.type), unit: str(v.unit, 60) };
+      if (name(k) && v && typeof v === 'object') out.vars[k] = { value: str(v.value, 60), unc: str(v.unc, 60), type: type(v.type), unit: str(v.unit, 60), reps: str(v.reps, 4000), inst: str(v.inst, 60) };
     });
     const t = d.table && typeof d.table === 'object' ? d.table : {};
     Object.entries(t.cols && typeof t.cols === 'object' ? t.cols : {}).forEach(([k, c]) => {
-      if (name(k) && c && typeof c === 'object') out.table.cols[k] = { perRow: !!c.perRow, unc: str(c.unc, 60), type: type(c.type), unit: str(c.unit, 60) };
+      if (name(k) && c && typeof c === 'object') out.table.cols[k] = { perRow: !!c.perRow && !c.fixed, unc: str(c.unc, 60), type: type(c.type), unit: str(c.unit, 60), fixed: !!c.fixed, value: str(c.value, 60) };
     });
     (Array.isArray(t.rows) ? t.rows.slice(0, 2000) : []).forEach((row) => {
       const r = {};
@@ -53,7 +55,8 @@
     const gr = t.graph && typeof t.graph === 'object' ? t.graph : {};
     const axis = (a, def) => (typeof a === 'string' && /^(result|custom|var:[A-Za-z_][A-Za-z0-9_]{0,39})$/.test(a) ? a : def);
     out.table.graph = {
-      x: axis(gr.x, ''), y: axis(gr.y, 'result'),
+      x: axis(gr.x, ''), y: axis(gr.y, ''),
+      derived: str(gr.derived, 300), derivedAccepted: str(gr.derivedAccepted, 60),
       xExpr: str(gr.xExpr, 200), yExpr: str(gr.yExpr, 200),
       xErrors: !!gr.xErrors, origin: !!gr.origin, title: str(gr.title, 120),
     };
@@ -136,8 +139,8 @@
   const N = EP.nameTex;
   const roundMode = () => (state.rounding === 'auto' ? 'auto' : Number(state.rounding));
   const fmt = (v, s) => EP.formatResult(v, s, roundMode());
-  const varState = (n) => (state.vars[n] = state.vars[n] || { value: '', unc: '', type: 'abs', unit: '' });
-  const colState = (n) => (state.table.cols[n] = state.table.cols[n] || { perRow: false, unc: '', type: 'abs', unit: '' });
+  const varState = (n) => (state.vars[n] = state.vars[n] || { value: '', unc: '', type: 'abs', unit: '', reps: '', inst: '' });
+  const colState = (n) => (state.table.cols[n] = state.table.cols[n] || { perRow: false, unc: '', type: 'abs', unit: '', fixed: false, value: '' });
   const cellState = (row, n) => (row[n] = row[n] || { value: '', unc: '' });
   const blank = (s) => String(s == null ? '' : s).trim() === '';
   const engineOpts = () => ({ degrees: state.degrees, resultUnit: state.resultUnit });
@@ -217,7 +220,7 @@
 
   function rebuildInputs(force) {
     const key = state.mode + '|' + names.join('|') + '|' +
-      (state.mode === 'table' ? names.map((n) => colState(n).perRow).join(',') + '|' + state.table.rows.length : '');
+      (state.mode === 'table' ? names.map((n) => colState(n).perRow + '/' + colState(n).fixed).join(',') + '|' + state.table.rows.length : '');
     if (key === builtFor && !force) return;
     builtFor = key;
     if (state.mode === 'table') renderTable(); else renderVars();
@@ -225,10 +228,31 @@
 
   // Shown before any equation is typed: a few real lab equations to start from.
   const EXAMPLES = [
-    { name: 'Pendulum', eq: 'g = 4*pi^2*L/T^2', vars: { L: ['50.0', '0.2', 'cm'], T: ['1.42', '0.03', 's'] } },
-    { name: 'Snell’s law', eq: 'n = sin(a)/sin(b)', vars: { a: ['40', '0.5', 'deg'], b: ['25', '0.5', 'deg'] } },
-    { name: 'Ohm’s law', eq: 'R = V/I', vars: { V: ['5.02', '0.05', 'V'], I: ['0.213', '0.002', 'A'] } },
-    { name: 'Kinetic energy', eq: 'E_k = 0.5*m*v^2', vars: { m: ['0.250', '0.001', 'kg'], v: ['3.1', '0.1', 'm/s'] } },
+    {
+      name: 'Pendulum', eq: 'g = 4*pi^2*L/T^2', accepted: '9.81',
+      vars: { L: ['50.0', '0.2', 'cm'], T: ['1.42', '0.03', 's'] },
+      rows: { L: ['30.0', '40.0', '50.0', '60.0', '70.0'], T: ['1.10', '1.27', '1.42', '1.55', '1.68'] },
+      graph: { y: 'custom', yExpr: 'T^2', x: 'var:L', derived: 'g = 4*pi^2/m', derivedAccepted: '9.81' },
+    },
+    {
+      name: 'Snell’s law', eq: 'n = sin(a)/sin(b)',
+      vars: { a: ['40', '0.5', 'deg'], b: ['25', '0.5', 'deg'] },
+      rows: { a: ['20', '30', '40', '50', '60'], b: ['13.2', '19.5', '25.4', '30.7', '35.3'] },
+      graph: { y: 'custom', yExpr: 'sin(a)', x: 'custom', xExpr: 'sin(b)', derived: 'n = m' },
+    },
+    {
+      name: 'Ohm’s law', eq: 'R = V/I',
+      vars: { V: ['5.02', '0.05', 'V'], I: ['0.213', '0.002', 'A'] },
+      rows: { V: ['1.00', '2.01', '3.02', '3.98', '5.02'], I: ['0.043', '0.085', '0.128', '0.169', '0.213'] },
+      graph: { y: 'var:V', x: 'var:I', derived: 'R = m' },
+    },
+    {
+      name: 'Kinetic energy', eq: 'E_k = 0.5*m*v^2',
+      vars: { m: ['0.250', '0.001', 'kg'], v: ['3.1', '0.1', 'm/s'] },
+      fixed: ['m'],
+      rows: { v: ['1.2', '1.9', '2.4', '3.1', '3.6'] },
+      graph: {},
+    },
   ];
   function emptyState() {
     const list = el('div', { class: 'examples' });
@@ -239,16 +263,51 @@
     });
     resultBox.replaceChildren(el('div', { class: 'empty-state' },
       el('h2', null, 'Start with an equation'),
-      el('p', null, 'Type your own above, or open one of these worked examples with realistic measurements and units.'),
+      el('p', null, state.mode === 'table'
+        ? 'Type your own above, or open one of these worked examples with a table of realistic readings and a fitted graph.'
+        : 'Type your own above, or open one of these worked examples with realistic measurements and units.'),
       list));
   }
+  // Only reachable while the equation is empty, so it never replaces typed work.
   function loadExample(ex) {
-    if (state.mode !== 'single') setMode('single', false);
     state.equation = eqInput.value = ex.eq;
-    Object.entries(ex.vars).forEach(([n, [value, unc, unit]]) => (state.vars[n] = { value, unc, type: 'abs', unit }));
+    state.accepted = ex.accepted || ''; state.acceptedUnc = '';
+    Object.entries(ex.vars).forEach(([n, [value, unc, unit]]) => {
+      state.vars[n] = { value, unc, type: 'abs', unit, reps: '', inst: '' };
+      const fixed = (ex.fixed || []).includes(n);
+      state.table.cols[n] = { perRow: false, unc, type: 'abs', unit, fixed, value: fixed ? value : '' };
+    });
+    const count = Math.max(...Object.values(ex.rows).map((c) => c.length));
+    state.table.rows = Array.from({ length: count }, (_, i) => {
+      const row = {};
+      Object.entries(ex.rows).forEach(([n, col]) => (row[n] = { value: col[i] || '', unc: '' }));
+      return row;
+    });
+    state.table.selected = 0;
+    Object.assign(state.table.graph, { x: '', y: '', xExpr: '', yExpr: '', derived: '', derivedAccepted: '', xErrors: false, origin: false, title: '' }, ex.graph);
+    applyControls();
     builtFor = '';
     update();
-    eqInput.focus();
+  }
+
+  // ---------- compare a result with an accepted value ----------
+  function comparisonBox(nameTex, value, sigma, units, accStr, accUncStr) {
+    if (blank(accStr)) return null;
+    const acc = EP.parseNumber(accStr), au = blank(accUncStr) ? 0 : EP.parseNumber(accUncStr);
+    if (isNaN(acc) || isNaN(au) || au < 0) return el('div', { class: 'check pending' }, 'Can’t read the accepted value as a number.');
+    const k = EP.compare(value, sigma, acc, au), us = unitSuffix(units);
+    const signed = (x, n) => (x >= 0 ? '+' : '−') + num(Math.abs(x), n);
+    const diff = `Difference from the accepted value: ${signed(k.diff, 3)}${us}` + (isFinite(k.percent) ? ` (${signed(k.percent, 2)}%)` : '') + '.';
+    if (!(k.nSigma >= 0)) return el('div', { class: 'check pending' }, diff + ' There is no uncertainty to compare it against.');
+    const n = num(k.nSigma, 2);
+    let cls = 'good', verdict;
+    if (k.nSigma <= 1) verdict = `Agrees with the accepted value: ${n}σ away (within 1σ).`;
+    else if (k.nSigma <= 2) verdict = `Consistent with the accepted value: ${n}σ away (within 2σ).`;
+    else if (k.nSigma <= 3) { cls = 'bad'; verdict = `Borderline: ${n}σ from the accepted value. Agreement is usually claimed within 2σ.`; }
+    else { cls = 'bad'; verdict = `Disagrees with the accepted value: ${n}σ away. Look for a systematic error, or uncertainties that are too small.`; }
+    const sig = au > 0 ? '\\sqrt{\\sigma^{2} + \\sigma_{\\text{acc}}^{2}}' : '\\sigma';
+    const line = '\\frac{\\left|{' + nameTex + '} - {' + nameTex + '}_{\\text{acc}}\\right|}{' + sig + '} = \\frac{\\left|' + T(value, 5) + ' - ' + T(acc, 5) + '\\right|}{' + T(k.combined, 3) + '} = ' + T(k.nSigma, 2);
+    return el('div', { class: 'check ' + cls + ' compare-box' }, verdict + ' ' + diff, tex(line, true));
   }
 
   function message(box, text, isError) {
@@ -289,6 +348,31 @@
   }
 
   // ================= single mode =================
+  const openReps = new Set(); // variables whose repeated-readings panel is open
+
+  // Repeated readings -> mean and uncertainty written into the variable.
+  function applyReps(v) {
+    if (blank(v.reps)) return null;
+    try {
+      const inst = blank(v.inst) ? 0 : EP.parseNumber(v.inst);
+      if (isNaN(inst)) throw new Error('Can’t read the instrument uncertainty as a number.');
+      const st = EP.repeatStats(EP.parseReadings(v.reps), inst);
+      v.value = String(Number(st.mean.toPrecision(10)));
+      v.unc = String(Number(st.sigma.toPrecision(6)));
+      v.type = 'abs';
+      return { st };
+    } catch (e) {
+      return { error: e.message };
+    }
+  }
+
+  function constantChip(n, label, onUse) {
+    const k = EP.PHYSICAL_CONSTANTS[n];
+    const b = el('button', { type: 'button', class: 'small chip' }, `Use ${n} = ${num(k.value, 9)} ${prettyUnit(k.unit)}`, el('span', { class: 'muted' }, ' ' + k.label + label));
+    b.addEventListener('click', () => onUse(k));
+    return b;
+  }
+
   function renderVars() {
     varsBox.replaceChildren();
     if (!names.length) {
@@ -297,21 +381,67 @@
     }
     varsBox.append(el('div', { class: 'var-head', 'aria-hidden': 'true' },
       el('span', { class: 'h-name' }, 'Name'), el('span', null, 'Value'), el('span', { class: 'h-pm' }),
-      el('span', null, 'Uncertainty'), el('span', null, 'Type'), el('span', null, 'Unit')));
+      el('span', null, 'Uncertainty'), el('span', null, 'Type'), el('span', null, 'Unit'), el('span', { class: 'h-rep' })));
+    const chips = el('div', { class: 'chips' });
     names.forEach((n) => {
       const s = varState(n);
-      const value = el('input', { class: 'v', type: 'text', inputmode: 'decimal', placeholder: 'value', 'aria-label': n + ' value', autocomplete: 'off' });
-      value.value = s.value;
-      const unc = el('input', { class: 'u', type: 'text', inputmode: 'decimal', placeholder: 'uncertainty', 'aria-label': n + ' uncertainty', autocomplete: 'off' });
-      unc.value = s.unc;
+      const value = el('input', { class: 'v', type: 'text', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'value', 'aria-label': n + ' value', autocomplete: 'off' });
+      const unc = el('input', { class: 'u', type: 'text', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'uncertainty', 'aria-label': n + ' uncertainty', autocomplete: 'off' });
       const type = typeSelect(s.type, n);
       value.addEventListener('input', () => { s.value = value.value; mark(value); update(); });
       unc.addEventListener('input', () => { s.unc = unc.value; mark(unc); update(); });
       type.addEventListener('change', () => { s.type = type.value; update(); });
-      mark(value); mark(unc);
       const unit = unitInput(s.unit, n + ' unit', (u) => { s.unit = u; update(); });
-      varsBox.append(el('div', { class: 'var-row' }, tex(N(n), false, 'var-name'), value, el('span', { class: 'pm' }, '±'), unc, type, unit));
+
+      // Repeated readings panel
+      if (!blank(s.reps)) openReps.add(n);
+      const repBtn = el('button', { type: 'button', class: 'small rep-btn', title: 'Work out the value and uncertainty from repeated readings' }, 'Repeats');
+      const readings = el('textarea', { rows: '2', placeholder: 'e.g. 1.41 1.43 1.40 1.44 1.42 (or paste a column)', 'aria-label': n + ' repeated readings', autocapitalize: 'off', spellcheck: 'false' });
+      readings.value = s.reps;
+      const inst = el('input', { type: 'text', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'optional', 'aria-label': n + ' instrument uncertainty', autocomplete: 'off' });
+      inst.value = s.inst;
+      const stats = el('div', { class: 'rep-stats' });
+      const panel = el('div', { class: 'reps' },
+        el('label', null, el('span', { class: 'opt-label' }, 'Readings of ', tex(N(n))), readings),
+        el('label', null, el('span', { class: 'opt-label' }, 'Instrument uncertainty'), inst),
+        stats);
+      const sync = () => {
+        const r = applyReps(s);
+        const on = !!r;
+        value.disabled = unc.disabled = type.disabled = on;
+        value.value = s.value; unc.value = s.unc; type.value = s.type;
+        mark(value); mark(unc); mark(inst);
+        stats.replaceChildren();
+        if (!r) stats.append(el('span', { class: 'muted' }, 'The mean becomes the value, and the standard error s/√n (combined with the instrument uncertainty) becomes the uncertainty.'));
+        else if (r.error) stats.append(el('span', { class: 'cell-error' }, r.error));
+        else {
+          const t = r.st, g = N(n);
+          const line = '\\bar{' + g + '} = ' + T(t.mean, 6) + ',\\quad s = ' + T(t.sd, 3) + ',\\quad \\frac{s}{\\sqrt{n}} = \\frac{' + T(t.sd, 3) + '}{\\sqrt{' + t.n + '}} = ' + T(t.se, 3);
+          stats.append(el('div', null, tex(line)));
+          if (t.instrument > 0) stats.append(el('div', null, tex('\\sigma_{' + g + '} = \\sqrt{' + T(t.se, 3) + '^{2} + ' + T(t.instrument, 3) + '^{2}} = ' + T(t.sigma, 3))));
+          if (!(t.sigma > 0)) stats.append(el('div', { class: 'muted' }, 'All the readings are identical, so the spread is 0. Add the instrument uncertainty.'));
+        }
+      };
+      const show = () => { panel.hidden = !openReps.has(n); repBtn.setAttribute('aria-expanded', String(openReps.has(n))); repBtn.classList.toggle('on', openReps.has(n)); };
+      repBtn.addEventListener('click', () => {
+        if (openReps.has(n)) { openReps.delete(n); s.reps = ''; readings.value = ''; sync(); update(); } else { openReps.add(n); }
+        show();
+        if (openReps.has(n)) readings.focus();
+      });
+      readings.addEventListener('input', () => { s.reps = readings.value; sync(); update(); });
+      inst.addEventListener('input', () => { s.inst = inst.value; sync(); update(); });
+      sync(); show();
+
+      varsBox.append(el('div', { class: 'var-row' }, tex(N(n), false, 'var-name'), value, el('span', { class: 'pm' }, '±'), unc, type, unit, repBtn), panel);
+
+      if (EP.PHYSICAL_CONSTANTS[n] && blank(s.value)) {
+        chips.append(constantChip(n, '', (k) => {
+          Object.assign(s, { value: String(k.value), unc: String(k.unc), type: 'abs', unit: k.unit, reps: '' });
+          builtFor = ''; update();
+        }));
+      }
     });
+    if (chips.children.length) varsBox.append(chips);
     varsBox.append(el('p', { class: 'hint' }, 'Units are optional. Give them (e.g. cm, s, kg, degC, deg) and the app converts to SI and checks that your equation’s units make sense.'));
   }
   function typeSelect(value, n) {
@@ -324,6 +454,8 @@
   function updateSingle() {
     const read = readVars((n) => varState(n));
     if (read.error) return message(resultBox, read.error, true);
+    const badReps = names.map((n) => [n, applyReps(varState(n))]).find(([, r]) => r && r.error);
+    if (badReps) return message(resultBox, `Repeated readings of ${badReps[0]}: ${badReps[1].error}`, true);
     if (read.missing) return message(resultBox, 'Enter a value for: ' + read.missing.join(', '));
     const res = runAll(read.vars);
     if (res.error) return message(resultBox, res.error, !res.error.startsWith('Enter a value'));
@@ -352,6 +484,8 @@
 
     const warnings = [...new Set([...(r.warnings || []), ...(r === lin ? [] : lin.warnings)])];
     warnings.forEach((w) => parts.push(el('div', { class: 'warn' }, w)));
+    const cmp = comparisonBox(N(r.name), sh.value, sh.sigma, r.units, state.accepted, state.acceptedUnc);
+    if (cmp) parts.push(cmp);
 
     if (lin.sigma > 0) {
       parts.push(el('div', { class: 'check pending mc-check' }, 'Running Monte Carlo check…'));
@@ -490,7 +624,7 @@
   // ================= table mode =================
 
   // Editable columns in order (used for paste and Enter-to-move-down).
-  const editCols = () => names.flatMap((n) => (colState(n).perRow ? [[n, 'value'], [n, 'unc']] : [[n, 'value']]));
+  const editCols = () => names.filter((n) => !colState(n).fixed).flatMap((n) => (colState(n).perRow ? [[n, 'value'], [n, 'unc']] : [[n, 'value']]));
 
   function renderTable() {
     tableBox.replaceChildren();
@@ -499,11 +633,13 @@
       tableBox.append(el('p', { class: 'empty' }, 'Your columns will appear here once you type an equation.'));
       return;
     }
-    // Uncertainty and unit settings per variable
+    // Uncertainty, unit and (optionally) one fixed value per variable
     const config = el('div', { class: 'col-config' });
+    const chips = el('div', { class: 'chips' });
     names.forEach((n) => {
       const c = colState(n);
-      const unc = el('input', { type: 'text', inputmode: 'decimal', placeholder: 'uncertainty', 'aria-label': n + ' uncertainty for all rows', autocomplete: 'off', disabled: c.perRow });
+      const numAttrs = { type: 'text', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off' };
+      const unc = el('input', Object.assign({ class: 'u-all', placeholder: 'uncertainty', 'aria-label': n + ' uncertainty for all rows', disabled: c.perRow }, numAttrs));
       unc.value = c.perRow ? '' : c.unc;
       unc.addEventListener('input', () => { c.unc = unc.value; mark(unc); update(); });
       mark(unc);
@@ -511,6 +647,13 @@
       type.addEventListener('change', () => { c.type = type.value; update(); });
       const unit = unitInput(c.unit, n + ' unit', (u) => { c.unit = u; builtFor = ''; update(); refocus('.cfg-row', n); });
       unit.dataset.var = n;
+      let fval = null;
+      if (c.fixed) {
+        fval = el('input', Object.assign({ class: 'fixed-value', placeholder: 'value', 'aria-label': n + ' value for every row' }, numAttrs));
+        fval.value = c.value;
+        mark(fval);
+        fval.addEventListener('input', () => { c.value = fval.value; mark(fval); update(); });
+      }
       const per = el('input', { type: 'checkbox', checked: c.perRow });
       per.addEventListener('change', () => {
         c.perRow = per.checked;
@@ -523,12 +666,32 @@
         }
         update();
       });
-      config.append(el('div', { class: 'cfg-row' },
-        tex(N(n), false, 'var-name'),
+      const fixed = el('input', { type: 'checkbox', checked: c.fixed });
+      fixed.addEventListener('change', () => {
+        c.fixed = fixed.checked;
+        if (c.fixed) {
+          c.perRow = false;
+          const first = state.table.rows.find((row) => row[n] && !blank(row[n].value));
+          if (blank(c.value) && first) c.value = first[n].value;
+        }
+        builtFor = '';
+        update();
+      });
+      config.append(el('div', { class: 'cfg-row' + (c.fixed ? ' is-fixed' : '') },
+        tex(N(n), false, 'var-name'), fval,
         el('span', { class: 'pm' }, '±'), unc, type, unit,
-        el('label', { class: 'per-row' }, per, ' different for each row')));
+        el('div', { class: 'cfg-extra' },
+          c.fixed ? null : el('label', { class: 'per-row' }, per, ' uncertainty differs in each row'),
+          el('label', { class: 'per-row' }, fixed, ' same value in every row'))));
+      if (EP.PHYSICAL_CONSTANTS[n] && !c.fixed && state.table.rows.every((row) => !row[n] || blank(row[n].value))) {
+        chips.append(constantChip(n, ', in every row', (k) => {
+          Object.assign(c, { fixed: true, perRow: false, value: String(k.value), unc: String(k.unc), type: 'abs', unit: k.unit });
+          builtFor = ''; update();
+        }));
+      }
     });
-    tableBox.append(el('p', { class: 'hint first' }, 'Uncertainty (same for every row, unless you tick the box) and unit of each variable:'), config);
+    tableBox.append(el('p', { class: 'hint first' }, 'Uncertainty and unit of each variable. Tick a box if the uncertainty differs in each row, or if the value is the same in every row.'), config);
+    if (chips.children.length) tableBox.append(chips);
 
     // The grid
     const cols = editCols();
@@ -544,7 +707,7 @@
       tr.append(el('td', { class: 'rownum' }, numBtn));
       cols.forEach(([n, field], c) => {
         const cell = cellState(row, n);
-        const input = el('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', 'data-r': r, 'data-c': c, 'aria-label': `Row ${r + 1} ${field === 'unc' ? 'uncertainty of ' : ''}${n}` });
+        const input = el('input', { type: 'text', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off', 'data-r': r, 'data-c': c, 'aria-label': `Row ${r + 1} ${field === 'unc' ? 'uncertainty of ' : ''}${n}` });
         input.value = cell[field];
         mark(input);
         input.addEventListener('input', () => { cell[field] = input.value; mark(input); update(); });
@@ -646,7 +809,7 @@
   function rowGetter(row) {
     return (n) => {
       const c = colState(n), cell = cellState(row, n);
-      return { value: cell.value, unc: c.perRow ? cell.unc : c.unc, type: c.type, needUnc: c.perRow, unit: c.unit };
+      return { value: c.fixed ? c.value : cell.value, unc: c.perRow && !c.fixed ? cell.unc : c.unc, type: c.type, needUnc: c.perRow && !c.fixed, unit: c.unit };
     };
   }
 
@@ -654,7 +817,8 @@
     let units = null;
     rowResults = state.table.rows.map((row, r) => {
       const cells = rowCells[r];
-      const empty = names.every((n) => blank(cellState(row, n).value));
+      const free = names.filter((n) => !colState(n).fixed);
+      const empty = free.every((n) => blank(cellState(row, n).value));
       if (empty) { cells.res.replaceChildren(); cells.chk.replaceChildren(); return null; }
       const read = readVars(rowGetter(row));
       let res;
@@ -695,7 +859,9 @@
     const parts = [];
     if (!good.length) {
       const anyStarted = rowResults.some((r) => r);
-      return message(resultBox, anyStarted ? 'Finish entering at least one row to see results.' : 'Enter your readings in the table (or paste them from a spreadsheet).');
+      return message(resultBox, anyStarted ? 'Finish entering at least one row to see results.'
+        : names.every((n) => colState(n).fixed) ? 'Every variable is set to the same value in every row. Untick one to enter readings.'
+          : 'Enter your readings in the table (or paste them from a spreadsheet).');
     }
     const first = good[0].r.main, g = N(first.name);
     const s = tableSummary(good);
@@ -712,6 +878,10 @@
     } else {
       parts.push(el('p', { class: 'hint' }, 'Add more rows to see the mean.'));
     }
+    if (s.n > 1) {
+      const cmp = comparisonBox('\\bar{' + g + '}', s.mean, s.sem, first.units, state.accepted, state.acceptedUnc);
+      if (cmp) parts.push(cmp);
+    }
     if (s.chi2red > 2 && s.n >= 3) {
       parts.push(el('div', { class: 'warn' }, `If every row measures the same quantity: the results scatter more than their uncertainties suggest (reduced χ² = ${num(s.chi2red, 2)}), so there may be a systematic error or underestimated uncertainties, and the plain mean ± standard error is the safer one to quote. (If the rows are meant to change, e.g. points for a graph, ignore this and use the straight-line fit below.)`));
     }
@@ -727,10 +897,22 @@
 
   const graphState = () => {
     const g = state.table.graph;
-    if (!g.x || (g.x.startsWith('var:') && !names.includes(g.x.slice(4)))) g.x = names.length ? 'var:' + names[0] : 'result';
-    if (g.y.startsWith('var:') && !names.includes(g.y.slice(4))) g.y = 'result';
+    const free = names.filter((n) => !colState(n).fixed);
+    const ok = (a) => a === 'result' || a === 'custom' || (a.startsWith('var:') && names.includes(a.slice(4)));
+    // Default to two measured columns: a result plotted against its own inputs is not independent data.
+    if (!g.x || !ok(g.x)) g.x = free.length ? 'var:' + free[0] : 'result';
+    if (!g.y || !ok(g.y)) g.y = free.length >= 2 ? 'var:' + free[1] : 'result';
     return g;
   };
+
+  // The measured variables (with an uncertainty) that an axis depends on.
+  function axisVars(which, expr) {
+    let ns;
+    if (which === 'result') ns = names;
+    else if (which.startsWith('var:')) ns = [which.slice(4)];
+    else { try { ns = EP.listVariables(expr.includes('=') ? expr : 'f = ' + expr); } catch (e) { ns = []; } }
+    return ns.filter((n) => { const c = colState(n); return (c.perRow && !c.fixed) || EP.parseNumber(c.unc) > 0; });
+  }
 
   function axisOptions(selected) {
     const s = el('select', null,
@@ -761,6 +943,13 @@
       c.addEventListener('change', () => { g[key] = c.checked; save(); renderGraph(); });
       return el('label', { class: 'per-row', title }, c, ' ' + label);
     };
+    const derived = el('input', { type: 'text', class: 'mono derived-eq', placeholder: 'e.g. g = 4*pi^2/m', 'aria-label': 'Equation using the slope m and intercept c', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    derived.value = g.derived;
+    const dAcc = el('input', { type: 'text', class: 'unit wide', placeholder: 'optional', 'aria-label': 'Accepted value for the calculated quantity', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    dAcc.value = g.derivedAccepted;
+    const redoDerived = () => { save(); if (lastFit) renderDerived({ fit: lastFit.fit, slopeU: lastFit.slopeU, yUnits: lastFit.yUnits, hasUnits: lastFit.hasUnits }); };
+    derived.addEventListener('input', () => { g.derived = derived.value; redoDerived(); });
+    dAcc.addEventListener('input', () => { g.derivedAccepted = dAcc.value; mark(dAcc); redoDerived(); });
     const title = el('input', { type: 'text', placeholder: 'Title for the PNG', 'aria-label': 'Graph title', autocomplete: 'off' });
     title.value = g.title;
     title.addEventListener('input', () => { g.title = title.value; save(); });
@@ -775,7 +964,13 @@
         check('xErrors', 'use x error bars in the fit', 'Effective variance: σ² = σ_y² + (m σ_x)². LSFR itself uses y errors only.'),
         check('origin', 'line through the origin (y = mx)', 'Fit y = mx with no intercept'),
         title),
-      el('div', { id: 'graph-out' }));
+      el('div', { id: 'graph-out' }),
+      el('h3', null, 'Calculate from the fit'),
+      el('p', { class: 'hint first' }, 'Use the slope m and intercept c in an equation, with pi, e and named constants (g, h, k_B, R, G, q_e and more) if you need them. The link between m and c is included in the uncertainty.'),
+      el('div', { class: 'graph-controls' },
+        el('label', { class: 'axis-pick grow' }, el('span', { class: 'opt-label' }, 'Equation'), derived),
+        el('label', { class: 'axis-pick' }, el('span', { class: 'opt-label' }, 'Accepted value'), dAcc)),
+      el('div', { id: 'derived-out' }));
     return box;
   }
 
@@ -841,6 +1036,9 @@
     pts.forEach((p) => (p.label = `Row ${p.row}: x = ${num(p.x, 5)} ± ${num(p.sx, 3)}, y = ${num(p.y, 5)} ± ${num(p.sy, 3)}`));
 
     const leftNote = left.length ? el('p', { class: 'hint' }, 'Left out: ' + left.join('; ') + '.') : null;
+    const xv = axisVars(g.x, g.xExpr), shared = axisVars(g.y, g.yExpr).filter((n) => xv.includes(n));
+    const sharedNote = shared.length ? el('div', { class: 'warn' }, `Both axes depend on ${shared.join(' and ')}, so their error bars are linked, but the fit treats them as independent. The uncertainties on m and c, and χ², are not reliable for this choice of axes. Plot two separately measured quantities instead (for example T^2 against L).`) : null;
+    renderDerived(null);
     let fit;
     try {
       fit = EP.linearFit(pts.map((p) => p.x), pts.map((p) => p.y), pts.map((p) => p.sy),
@@ -885,9 +1083,53 @@
         el('div', { class: 'plot-ylabel' }, el('span', { class: 'muted' }, 'y: '), tex(yt.tex + mul(screen.yE))),
         svgBox,
         el('div', { class: 'plot-xlabel' }, el('span', { class: 'muted' }, 'x: '), tex(xt.tex + mul(screen.xE)))),
-      results, verdict, raw, leftNote || '', buttons);
+      results, sharedNote || '', verdict, raw, leftNote || '', buttons);
 
-    lastFit = { fit, xt, yt, slopeU, yUnits, n: pts.length };
+    lastFit = { fit, xt, yt, slopeU, yUnits, n: pts.length, hasUnits: !!(xu || yu) };
+    renderDerived({ fit, slopeU, yUnits, hasUnits: !!(xu || yu) });
+  }
+
+  // A quantity worked out from the fitted slope and intercept, e.g. g = 4*pi^2/m.
+  function renderDerived(ctx) {
+    const out = $('derived-out');
+    if (!out) return;
+    const g = state.table.graph;
+    if (lastFit) lastFit.derived = null;
+    if (!ctx || blank(g.derived)) return out.replaceChildren();
+    const { fit, slopeU, yUnits, hasUnits } = ctx;
+    const fail = (t) => out.replaceChildren(el('p', { class: 'msg error' }, t));
+    let ns;
+    try { ns = EP.listVariables(g.derived); } catch (e) { return fail(e.message); }
+    const vars = [], used = [];
+    for (const n of ns) {
+      if (n === 'm') vars.push({ name: 'm', value: fit.m, unc: fit.sm, type: 'abs', unit: slopeU ? slopeU.display : '' });
+      else if (n === 'c') {
+        if (fit.origin) return fail('This fit goes through the origin, so there is no intercept c.');
+        vars.push({ name: 'c', value: fit.c, unc: fit.sc, type: 'abs', unit: yUnits ? yUnits.display : '' });
+      } else if (EP.PHYSICAL_CONSTANTS[n]) {
+        const k = EP.PHYSICAL_CONSTANTS[n];
+        vars.push({ name: n, value: k.value, unc: k.unc, type: 'abs', unit: hasUnits ? k.unit : '' });
+        used.push(`${n} = ${num(k.value, 9)} ${prettyUnit(k.unit)}`);
+      } else {
+        return fail(`${n} isn’t available here. Use m, c, pi, e, or a constant: ${Object.keys(EP.PHYSICAL_CONSTANTS).join(', ')}.`);
+      }
+    }
+    let r;
+    try {
+      r = EP.calculate(g.derived, vars, { degrees: state.degrees, correlations: [{ a: 'm', b: 'c', rho: fit.rho }] });
+    } catch (e) { return fail(e.message); }
+    const sh = shown(r), resultTex = N(r.name) + ' = ' + sh.tex;
+    const notes = [];
+    if (ns.includes('m') && ns.includes('c')) notes.push(`Includes the correlation between m and c (ρ = ${num(fit.rho, 3)}).`);
+    if (used.length) notes.push('Using ' + used.join(', ') + '.');
+    if (r.sigma > 0) notes.push('Relative uncertainty ' + num(r.relative * 100, 2) + '%.');
+    out.replaceChildren(
+      el('div', { class: 'answer' }, tex(resultTex, false, 'big'),
+        el('div', { class: 'buttons' }, copyButton('Copy', () => r.name + ' = ' + sh.text), copyButton('Copy LaTeX', () => resultTex))),
+      notes.length ? el('div', { class: 'sub' }, notes.join(' ')) : '',
+      ...r.warnings.map((w) => el('div', { class: 'warn' }, w)),
+      comparisonBox(N(r.name), sh.value, sh.sigma, r.units, g.derivedAccepted, '') || '');
+    if (lastFit) lastFit.derived = { equation: g.derived, name: r.name, value: sh.value, sigma: sh.sigma, unit: r.units && r.units.display ? r.units.display : '' };
   }
 
   function downloadGraph(spec, xt, yt, fm, fc, fit, btn, slopeU, yUnits) {
@@ -1044,6 +1286,11 @@
       rows.push(['points in fit', lastFit.n]);
       rows.push(['x errors in fit', F.xErrors ? 'yes (effective variance)' : 'no (as LSFR)']);
       rows.push(['line through origin', F.origin ? 'yes' : 'no']);
+      if (lastFit.derived) {
+        const d = lastFit.derived;
+        rows.push(['calculated from the fit', d.equation]);
+        rows.push([d.name + (d.unit ? ' [' + d.unit + ']' : ''), d.value, d.sigma]);
+      }
     }
     rows.push([]);
     rows.push(['session', store.sessions[store.active].name]);
@@ -1074,8 +1321,8 @@
       const row = state.table.rows[i];
       const cells = cols.map(({ n, c }) => {
         const cell = cellState(row, n);
-        const val = typedTex(cell.value);
-        return '$' + (c.perRow && !blank(cell.unc) ? val + ' \\pm ' + typedTex(cell.unc) + (c.type === 'pct' ? '\\%' : '') : val) + '$';
+        const val = typedTex(c.fixed ? c.value : cell.value);
+        return '$' + (c.perRow && !c.fixed && !blank(cell.unc) ? val + ' \\pm ' + typedTex(cell.unc) + (c.type === 'pct' ? '\\%' : '') : val) + '$';
       });
       lines.push(cells.concat('$' + shown(r.main).f.tex + '$').join(' & ') + ' \\\\');
     });
@@ -1262,6 +1509,8 @@
     roundSel.value = state.rounding;
     resultUnitInput.value = state.resultUnit;
     markUnit(resultUnitInput);
+    $('accepted').value = state.accepted; $('accepted-unc').value = state.acceptedUnc;
+    openReps.clear();
     setDegrees(!!state.degrees);
     setMethod(state.method, false);
     setMode(state.mode, false);
@@ -1276,21 +1525,9 @@
   roundSel.addEventListener('change', () => { state.rounding = roundSel.value; update(); });
   resultUnitInput.addEventListener('input', () => { state.resultUnit = resultUnitInput.value; markUnit(resultUnitInput); update(); });
   eqInput.addEventListener('input', () => { state.equation = eqInput.value; builtFor = ''; update(); });
-  $('example').addEventListener('click', () => {
-    state.equation = eqInput.value = 'g = 4*pi^2*L/T^2';
-    if (state.mode === 'table') {
-      state.table.cols.L = { perRow: false, unc: '0.2', type: 'abs', unit: 'cm' };
-      state.table.cols.T = { perRow: false, unc: '0.03', type: 'abs', unit: 's' };
-      const data = [['30.0', '1.10'], ['40.0', '1.27'], ['50.0', '1.42'], ['60.0', '1.55'], ['70.0', '1.68']];
-      state.table.rows = data.map(([L, T]) => ({ L: { value: L, unc: '' }, T: { value: T, unc: '' } }));
-      state.table.selected = 0;
-    } else {
-      state.vars.L = { value: '50.0', unc: '0.2', type: 'abs', unit: 'cm' };
-      state.vars.T = { value: '1.42', unc: '0.03', type: 'abs', unit: 's' };
-    }
-    builtFor = '';
-    update();
-  });
+  const accInput = $('accepted'), accUncInput = $('accepted-unc');
+  accInput.addEventListener('input', () => { state.accepted = accInput.value; mark(accInput); update(); });
+  accUncInput.addEventListener('input', () => { state.acceptedUnc = accUncInput.value; mark(accUncInput); update(); });
 
   const themeSel = $('theme');
   try { themeSel.value = localStorage.getItem('errorprop.theme') || ''; } catch (e) { /* storage blocked */ }

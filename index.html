@@ -60,7 +60,6 @@
       <div class="eq-row">
         <input id="eq" class="mono" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
                placeholder="g = 4*pi^2*L/T^2" aria-describedby="eq-help">
-        <button id="example" type="button">Example</button>
       </div>
       <div id="eq-preview" aria-label="Equation preview"></div>
       <details class="help" id="eq-help">
@@ -71,6 +70,8 @@
           <li><code>sin cos tan</code>, <code>asin acos atan</code>. Choose degrees or radians in the settings.</li>
           <li>Constants: <code>pi</code> and <code>e</code>. Any other name is a variable, so <code>E</code>, <code>c</code>, <code>phi</code> are fine. Greek names like <code>theta</code> show as symbols, and <code>v_max</code> gives a subscript.</li>
           <li>Numbers like <code>6.67e-11</code> or <code>6.67x10^-11</code>. A constant you know exactly can be a variable with uncertainty 0.</li>
+          <li>Constants: name a variable <code>g</code>, <code>c</code>, <code>h</code>, <code>hbar</code>, <code>k_B</code>, <code>N_A</code>, <code>R</code>, <code>G</code>, <code>q_e</code>, <code>epsilon_0</code>, <code>mu_0</code>, <code>m_e</code> or <code>m_p</code> and a button offers to fill in its accepted value.</li>
+          <li>Repeated readings: press <b>Repeats</b> beside a variable to enter several readings and use their mean and standard error.</li>
           <li>Units (optional), typed in each variable's unit box: <code>m cm mm um nm</code>, <code>s ms min h</code>, <code>kg g</code>, <code>N J W Pa</code>, <code>V A ohm C F T</code>, <code>Hz</code>, <code>K degC</code>, <code>deg rad</code>, and combinations like <code>m/s^2</code> or <code>kg m^2</code>.</li>
         </ul>
       </details>
@@ -105,6 +106,13 @@
       <div class="opt">
         <label class="opt-label" for="result-unit">Result unit</label>
         <input id="result-unit" class="unit wide" type="text" placeholder="auto (SI)" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="opt">
+        <label class="opt-label" for="accepted">Accepted value</label>
+        <input id="accepted" class="unit wide" type="text" placeholder="optional" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="accepted-help">
+        <span class="pm">±</span>
+        <input id="accepted-unc" class="unit" type="text" placeholder="optional" aria-label="Uncertainty of the accepted value" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <span class="muted" id="accepted-help">in the result's unit</span>
       </div>
       <div class="opt">
         <label class="opt-label" for="round">Round uncertainty to</label>

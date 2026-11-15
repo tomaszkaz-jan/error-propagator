@@ -252,7 +252,7 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 /* ---------- variables (single mode) ---------- */
 .var-row, .var-head {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 14px minmax(0, 1fr) 76px 88px;
+  grid-template-columns: 56px minmax(0, 1fr) 14px minmax(0, 1fr) 76px 88px 78px;
   gap: 8px; align-items: center;
 }
 .var-row { margin-bottom: 8px; }
@@ -391,15 +391,20 @@ button.del:hover { color: var(--bad); border-color: var(--line-strong); backgrou
   .session-bar select { flex: 1; max-width: none; }
   .session-area { align-items: stretch; width: 100%; }
   .var-row, .var-head { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 72px; }
-  .var-row .var-name { grid-column: 1 / -1; margin-bottom: -2px; }
-  .var-row .pm, .var-head .h-name, .var-head .h-pm { display: none; }
+  .var-row .var-name { grid-column: 1 / 4; grid-row: 1; align-self: center; }
+  .var-row .rep-btn { grid-column: 4; grid-row: 1; }
+  .var-row .v, .var-row .u, .var-row select, .var-row .unit { grid-row: 2; }
+  .var-row .pm, .var-head { display: none; }
+  .var-row { margin-bottom: 12px; }
+  .reps { grid-template-columns: 1fr; }
+  .cfg-row .var-name { min-width: 32px; }
+  .cfg-row input.u-all, .cfg-row .fixed-value { flex: 1 1 90px; width: auto; }
+  .cfg-row.is-fixed .fixed-value { flex-basis: calc(100% - 48px); }
+  .cfg-extra { flex-basis: 100%; }
   .seg[aria-label="Method"] { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
   .seg[aria-label="Method"] button { padding: 4px; font-size: 0.85rem; line-height: 1.2; white-space: normal; }
   .mode-switch { display: grid; grid-template-columns: 1fr 1fr; }
-  .cfg-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 72px 76px; gap: 6px 8px; }
   .cfg-row .pm { display: none; }
-  .cfg-row input[type="text"], .cfg-row input.unit { width: 100%; }
-  .cfg-row .per-row { grid-column: 2 / -1; min-height: 28px; }
   .col-config { gap: 12px; }
   .big .katex { font-size: 1.4rem; }
 }
@@ -410,4 +415,42 @@ button.del:hover { color: var(--bad); border-color: var(--line-strong); backgrou
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+/* ---------- v7: repeats, constants, fixed columns, accepted value, fit calculation ---------- */
+textarea {
+  font: inherit; font-family: var(--mono); color: inherit; width: 100%; resize: vertical;
+  background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-ctl); padding: 7px 10px;
+  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.rep-btn { width: 100%; padding: 0 6px; color: var(--muted); }
+.rep-btn.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.reps {
+  display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 10px 14px; align-items: start;
+  margin: -2px 0 14px; padding: 12px 14px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-ctl);
+}
+.reps label { display: grid; gap: 4px; }
+.reps label input { width: 100%; background: var(--surface); }
+.reps textarea { background: var(--surface); }
+.rep-stats { grid-column: 1 / -1; overflow-x: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }
+button.chip { white-space: normal; text-align: left; min-height: 32px; height: auto; padding: 5px 11px; border-style: dashed; }
+.cfg-extra { display: inline-flex; flex-wrap: wrap; gap: 2px 16px; }
+.cfg-row .fixed-value { width: 120px; }
+.compare-box .tex-display { margin-top: 8px; overflow-x: auto; overflow-y: hidden; color: var(--text); }
+.axis-pick.grow { flex: 1 1 260px; }
+.axis-pick.grow input { flex: 1; min-width: 0; }
+#derived-out .big .katex { font-size: 1.45rem; }
+#derived-out { margin-top: 4px; }
+.opt .pm { margin: 0 -4px; }
+#graph-out .buttons { margin-top: 12px; }
+#graph-out + h3 { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
+.axis-pick input.unit.wide { width: 130px; }
+#accepted-unc { width: 110px; }
+.rep-stats > div + div { margin-top: 6px; }
+.rep-stats > div { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+@media (max-width: 640px) {
+  .reps { grid-template-columns: minmax(0, 1fr); }
 }
