@@ -5,18 +5,20 @@ A web app for lab reports. Type an equation, enter each measured variable with i
 ## Use it
 Double-click `index.html` to open it in a browser. It works offline because math.js is stored in `vendor/`.
 
-## How it works
-It uses the general propagation formula for independent variables:
+## Methods
+- **Partial derivatives** (standard): σ_f² = Σ (∂f/∂xᵢ · σᵢ)², with derivatives worked out exactly by math.js
+- **Simple rules**, step by step: add absolute uncertainties for + and −, add % uncertainties for × and ÷, multiply the % by n for powers
+- **Max–min**: evaluate at every combination of xᵢ ± Δxᵢ and take half the range
+- **Monte Carlo check**: simulates 100,000 measurements and warns when the formula's straight-line approximation isn't reliable
 
-    σ_f² = Σ (∂f/∂xᵢ · σᵢ)²
-
-math.js works out the partial derivatives exactly (symbolically), and the app then evaluates them at your measured values.
+All maths is rendered in LaTeX (KaTeX), and the result and the full working can be copied as LaTeX.
 
 ## Files
 - `src/propagate.js`: the maths engine (parsing, derivatives, rounding)
 - `src/app.js`, `src/style.css`, `index.html`: the interface
 - `tests/tests.js`: test cases with independently worked answers
 - `vendor/math.js`: math.js 12.4.2
+- `vendor/katex/`: KaTeX 0.16.11 (renders LaTeX)
 
 ## Tests
     ./tests/run.sh
@@ -24,6 +26,6 @@ Or open `tests.html` in a browser.
 
 ## Roadmap
 - **v1** (done): single calculation, partial-derivative method, contribution breakdown, working
-- **v2**: simple-rules and max–min methods, Monte Carlo cross-check, LaTeX copy
+- **v2** (done): simple-rules and max–min methods, Monte Carlo cross-check, LaTeX everywhere and LaTeX copy
 - **v3**: table mode (paste readings from Excel), CSV export, saved sessions
 - **Later**: units checking, hosting on GitHub Pages

@@ -158,6 +158,99 @@
   test('round: forced 2 s.f.', () => same(fmt(9.789312, 0.415548, 2), '9.79 ± 0.42'));
   test('round: zero uncertainty', () => same(fmt(9.81, 0), '9.81'));
 
+  // ----- Simple rules -----
+  const rules = (eq, vars, opts) => EP.simpleRules(eq, vars, opts);
+  test('rules: sum adds absolute uncertainties', () => near(rules('x + y', [v('x', 2, 0.1), v('y', 3, 0.2)]).sigma, 0.3));
+  test('rules: difference adds absolute uncertainties', () => near(rules('x - y', [v('x', 2, 0.1), v('y', 3, 0.2)]).sigma, 0.3));
+  test('rules: product adds % uncertainties', () => near(rules('x*y', [v('x', 2, 0.1), v('y', 3, 0.2)]).sigma, 6 * (0.05 + 0.2 / 3)));
+  test('rules: quotient adds % uncertainties', () => near(rules('x/y', [v('x', 2, 0.1), v('y', 3, 0.2)]).sigma, (2 / 3) * (0.05 + 0.2 / 3)));
+  test('rules: power multiplies % by n', () => near(rules('x^3', [v('x', 2, 0.1)]).sigma, 8 * 3 * 0.05));
+  test('rules: pendulum = %L + 2×%T', () => {
+    const r = rules('g = 4*pi^2*L/T^2', [v('L', 0.5, 0.002), v('T', 1.42, 0.03)]);
+    const g = (4 * Math.PI ** 2 * 0.5) / 1.42 ** 2;
+    near(r.sigma, g * (0.002 / 0.5 + (2 * 0.03) / 1.42));
+  });
+  test('rules: steps listed inner first', () => {
+    const r = rules('(x + y)*z', [v('x', 2, 0.1), v('y', 3, 0.2), v('z', 4, 0)]);
+    same(r.steps.length, 2);
+    near(r.steps[0].delta, 0.3); near(r.steps[1].delta, 1.2);
+    if (!r.steps[0].rule.includes('absolute')) throw new Error(r.steps[0].rule);
+  });
+  test('rules: repeated variable warns', () => {
+    const r = rules('x/(x+y)', [v('x', 2, 0.1), v('y', 3, 0.2)]);
+    near(r.sigma, 0.1 / 5 + (2 / 25) * 0.3);
+    if (!r.warnings.some((w) => w.includes('more than once'))) throw new Error('no warning');
+  });
+  test('rules: functions use slope', () => near(rules('ln(x)', [v('x', 10, 0.5)]).sigma, 0.05));
+
+  // ----- Max-min -----
+  const mm = (eq, vars, opts) => EP.maxMin(eq, vars, opts);
+  test('maxmin: sum', () => {
+    const r = mm('x + y', [v('x', 2, 0.1), v('y', 3, 0.2)]);
+    near(r.max, 5.3); near(r.min, 4.7); near(r.sigma, 0.3);
+  });
+  test('maxmin: pendulum', () => {
+    const r = mm('g = 4*pi^2*L/T^2', [v('L', 0.5, 0.002), v('T', 1.42, 0.03)]);
+    const hi = (4 * Math.PI ** 2 * 0.502) / 1.39 ** 2, lo = (4 * Math.PI ** 2 * 0.498) / 1.45 ** 2;
+    near(r.max, hi); near(r.min, lo); near(r.sigma, (hi - lo) / 2);
+    same(r.maxAt.map((a) => a.shift), [1, -1]);
+  });
+  test('maxmin: x/(x+y)', () => near(mm('x/(x+y)', [v('x', 2, 0.1), v('y', 3, 0.2)]).sigma, (2.1 / 4.9 - 1.9 / 5.1) / 2));
+  test('maxmin: degrees', () => {
+    const r = mm('sin(t)', [v('t', 30, 1)], { degrees: true });
+    near(r.sigma, (Math.sin(31 * D) - Math.sin(29 * D)) / 2);
+  });
+  test('maxmin: peak inside range warns', () => {
+    if (!mm('sin(t)', [v('t', 90, 2)], { degrees: true }).warnings.length) throw new Error('no warning');
+  });
+
+  // ----- Monte Carlo -----
+  const mc = (eq, vars, opts) => EP.monteCarlo(eq, vars, opts, { n: 100000, seed: 1 });
+  test('MC: sum matches quadrature within 1%', () => {
+    const r = mc('x + y', [v('x', 2, 0.1), v('y', 3, 0.2)]);
+    if (Math.abs(r.sd / Math.sqrt(0.05) - 1) > 0.01) throw new Error('sd ' + r.sd);
+    if (Math.abs(r.mean - 5) > 0.003) throw new Error('mean ' + r.mean);
+  });
+  test('MC: pendulum agrees with partial derivatives', () => {
+    const vars = [v('L', 0.5, 0.002), v('T', 1.42, 0.03)];
+    const lin = calc('g = 4*pi^2*L/T^2', vars), r = mc('g = 4*pi^2*L/T^2', vars);
+    const chk = EP.mcCheck(lin, r);
+    if (!chk.ok) throw new Error(JSON.stringify(chk));
+  });
+  test('MC: flags large error on 1/x', () => {
+    const vars = [v('x', 1, 0.3)];
+    const chk = EP.mcCheck(calc('1/x', vars), mc('1/x', vars));
+    if (chk.ok) throw new Error('should disagree');
+  });
+  test('MC: counts impossible values', () => {
+    const r = mc('sqrt(x)', [v('x', 0.1, 0.1)]);
+    if (!(r.failed > 10000 && r.failed < 20000)) throw new Error('failed ' + r.failed); // P(x<0) ≈ 15.9%
+  });
+  test('MC: same seed gives same answer', () => {
+    same(mc('x*y', [v('x', 2, 0.1), v('y', 3, 0.2)]).sd, mc('x*y', [v('x', 2, 0.1), v('y', 3, 0.2)]).sd);
+  });
+
+  // ----- LaTeX -----
+  test('tex: variable names', () => {
+    same(EP.nameTex('theta'), '\\theta');
+    same(EP.nameTex('L_1'), 'L_{1}');
+    same(EP.nameTex('v_max'), 'v_{\\mathrm{max}}');
+    same(EP.nameTex('phi_2'), '\\phi_{2}');
+    same(EP.nameTex('mv'), '\\mathit{mv}');
+  });
+  test('tex: equation', () => same(EP.equationTex('g = 4*pi^2*L/T^2').replace(/\s+/g, ' '), 'g = \\frac{4\\cdot{ \\pi}^{2}\\cdot L}{{ T}^{2}}'));
+  test('tex: ln shows as \\ln', () => {
+    if (!EP.equationTex('y = ln(x)').includes('\\ln')) throw new Error(EP.equationTex('y = ln(x)'));
+  });
+  test('tex: result', () => {
+    same(EP.formatResult(9.789, 0.4155, 'auto').tex, '9.8 \\pm 0.4');
+    same(EP.formatResult(6.674e-11, 0.015e-11, 'auto').tex, '\\left(6.674 \\pm 0.015\\right)\\times10^{-11}');
+  });
+  test('tex: numbers', () => {
+    same(EP.numTex(19.5794), '19.58');
+    same(EP.numTex(6.674e-11), '6.674\\times10^{-11}');
+  });
+
   root.runTests = function () {
     return cases.map((c) => {
       try { c.fn(); return { name: c.name, ok: true }; }
