@@ -3,7 +3,11 @@
 A web app for lab reports. Type an equation, enter each measured variable with its uncertainty, and get the result ± uncertainty, rounded properly. It also shows which variable contributes most to the uncertainty and the full working.
 
 ## Use it
-Double-click `index.html` to open it in a browser. It works offline because math.js is stored in `vendor/`.
+**Online:** https://tomaszkaz-jan.github.io/error-propagator/ (works on phones too)
+
+**Offline:** double-click `index.html` to open it in a browser. Everything it needs, including math.js and KaTeX, is in `vendor/`.
+
+Saved sessions are kept separately by the online and offline versions. Use **Back up** and **Restore** to move them between the two.
 
 ## Methods
 - **Partial derivatives** (standard): σ_f² = Σ (∂f/∂xᵢ · σᵢ)², with derivatives worked out exactly by math.js
@@ -38,5 +42,5 @@ Or open `tests.html` in a browser.
 - **v2** (done): simple-rules and max–min methods, Monte Carlo cross-check, LaTeX everywhere and LaTeX copy
 - **v3** (done): table mode built into the app, paste from Excel, per-row Monte Carlo, summary statistics, CSV export, LaTeX table
 - **v4** (done): saved sessions with backup/restore, units with dimension checking and unit conversion
-- **Next**: hosting on GitHub Pages
+- **Hosted** on GitHub Pages
 - **Later**: units checking, hosting on GitHub Pages
