@@ -346,6 +346,14 @@ table.grid .rownum { width: 1%; text-align: center; }
 tr.sel .rownum-btn { color: var(--accent); font-weight: 700; }
 td.res { white-space: nowrap; min-width: 120px; }
 td.res .rel { font-size: 0.75rem; font-family: var(--mono); }
+/* Copying results: click a result, the column's Copy button, or a row's ⧉ button. */
+button.res-copy { min-height: 0; padding: 2px 4px; margin: -2px -4px; border: 1px solid transparent; background: transparent; color: inherit; font: inherit; cursor: copy; }
+button.res-copy:hover { border-color: var(--line-strong); background: var(--surface); }
+.copied::after { content: ' ✓'; color: var(--good); font-weight: 700; }
+th.res-col .col-copy { min-height: 24px; padding: 0 8px; margin-left: 8px; font-size: 0.75rem; font-weight: 500; vertical-align: middle; }
+td.row-btns { white-space: nowrap; width: 1%; }
+button.row-copy { min-height: 30px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--muted); font-size: 0.95rem; }
+button.row-copy:hover { color: var(--text); border-color: var(--line-strong); background: var(--surface); }
 td.chk { text-align: center; width: 1%; }
 .ok-mark { color: var(--good); font-weight: 700; }
 .warn-mark {
@@ -416,7 +424,7 @@ button.del:hover { color: var(--bad); border-color: var(--line-strong); backgrou
 }
 @media (pointer: coarse) {
   button, .button, input, select { min-height: 44px; }
-  button.small, .button.small, .seg button, .rownum-btn, button.del, table.grid input { min-height: 40px; }
+  button.small, .button.small, .seg button, .rownum-btn, button.del, button.row-copy, table.grid input { min-height: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -514,7 +522,7 @@ details.settings > .options { padding: 6px 20px 20px; border-top: 1px solid var(
   body { font-size: 11pt; }
   main { max-width: none; padding: 0; }
   .session-area, .mode-switch, .help, .keys, .buttons, .table-actions, .site-footer, .skip-link, .toast,
-  .tabs, .chips, .examples, .rep-btn, button.del, .graph-controls, .hint, .logo, .tagline, .cfg-extra { display: none !important; }
+  .tabs, .chips, .examples, .rep-btn, button.del, button.row-copy, .col-copy, .graph-controls, .hint, .logo, .tagline, .cfg-extra { display: none !important; }
   .card { border: 0; box-shadow: none; padding: 0; margin-bottom: 14pt; }
   .tab-panel[hidden] { display: block !important; }
   .tab-panel + .tab-panel { margin-top: 16pt; padding-top: 10pt; border-top: 1px solid var(--line); }

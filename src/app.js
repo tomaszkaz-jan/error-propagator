@@ -185,7 +185,13 @@
   const unitTexSuffix = (units) => (units && units.display ? (units.tex.startsWith('^') ? '' : '\\,') + units.tex : '');
 
   function copyText(text, b, label) {
-    const done = () => { b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = label), 1500); };
+    clip(text, () => { b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = label), 1500); });
+  }
+  // For buttons whose content isn't plain text (a result in the table): show a tick beside it.
+  function copyFlash(text, b) {
+    clip(text, () => { b.classList.add('copied'); setTimeout(() => b.classList.remove('copied'), 1200); });
+  }
+  function clip(text, done) {
     const fallback = () => {
       const t = el('textarea', { style: 'position:fixed;opacity:0' });
       t.value = text; document.body.append(t); t.select();
@@ -768,7 +774,7 @@
     const unitOf = (n) => (blank(colState(n).unit) ? '' : '\\ (' + EP.unitTex(colState(n).unit.trim()) + ')');
     const head = el('tr', null, el('th', { class: 'rownum' }, '#'),
       cols.map(([n, field]) => el('th', null, tex((field === 'unc' ? '\\sigma_{' + colTex(n) + '}' : colTex(n)) + unitOf(n)))),
-      xyMode() ? null : el('th', { class: 'res-col' }, el('span', { class: 'res-head' }, tex(N(resultName())))),
+      xyMode() ? null : el('th', { class: 'res-col' }, el('span', { class: 'res-head' }, tex(N(resultName()))), colCopy()),
       xyMode() ? null : el('th', { title: 'Monte Carlo check' }, 'check'), el('th'));
     const body = el('tbody');
     state.table.rows.forEach((row, r) => {
@@ -799,7 +805,12 @@
         update();
         if (hadData) undoable(`Row ${r + 1} deleted.`, () => { state.table.rows = JSON.parse(before); state.table.selected = sel; builtFor = ''; update(); });
       });
-      tr.append(...[res, chk].filter(Boolean), el('td', null, del));
+      let rowCopy = null;
+      if (!xyMode()) {
+        rowCopy = el('button', { type: 'button', class: 'row-copy', title: `Copy row ${r + 1} (readings and result) for a spreadsheet`, 'aria-label': `Copy row ${r + 1}` }, '⧉');
+        rowCopy.addEventListener('click', () => copyFlash(rowText(r), rowCopy));
+      }
+      tr.append(...[res, chk].filter(Boolean), el('td', { class: 'row-btns' }, rowCopy, del));
       body.append(tr);
       rowCells.push({ tr, res, chk });
     });
@@ -821,6 +832,12 @@
     });
     tableBox.append(el('div', { class: 'table-actions' }, add, clear,
       el('span', { class: 'hint' }, 'Tip: copy cells from Excel and paste them into any cell. Enter and the arrow keys move between cells.')));
+  }
+
+  function colCopy() {
+    const b = el('button', { type: 'button', class: 'ghost small col-copy', title: 'Copy every result: value and uncertainty as two columns, ready to paste into a spreadsheet' }, 'Copy');
+    b.addEventListener('click', () => copyText(resultColumnText(), b, 'Copy'));
+    return b;
   }
 
   // x-y mode: rename a column, carrying its readings and settings across. Any text is fine:
@@ -951,7 +968,9 @@
       }
       units = units || res.main.units;
       const sh = shown(res.main);
-      cells.res.replaceChildren(tex(sh.f.tex));
+      const copyRes = el('button', { type: 'button', class: 'res-copy', title: 'Click to copy ' + sh.text }, tex(sh.f.tex));
+      copyRes.addEventListener('click', () => copyFlash(sh.text, copyRes));
+      cells.res.replaceChildren(copyRes);
       if (res.main.sigma > 0) cells.res.append(el('span', { class: 'muted rel' }, ' ' + num(res.main.relative * 100, 2) + '%'));
       cells.chk.replaceChildren(el('span', { class: 'muted' }, res.lin.sigma > 0 ? '…' : ''));
       return res;
@@ -1396,6 +1415,26 @@
   }
 
   // ================= export =================
+  // A rounded result as plain numbers for a spreadsheet: 3.2e5, not "3.2" with the power lost.
+  const rounded = (f) => (f.sci ? f.value + 'e' + f.exp : f.value);
+  const roundedSigma = (f) => (f.sigma == null ? '' : f.sci ? f.sigma + 'e' + f.exp : f.sigma);
+
+  // Copy the result column: value and uncertainty as two spreadsheet columns, one line per
+  // table row (blank for rows with no result) so it lines up when pasted beside the readings.
+  function resultColumnText() {
+    return rowResults.map((res) => {
+      if (!res || res.error) return '';
+      const f = shown(res.main).f;
+      return rounded(f) + '\t' + roundedSigma(f);
+    }).join('\n');
+  }
+  // Copy one row: its readings as typed, then the result and its uncertainty.
+  function rowText(i) {
+    const row = state.table.rows[i], res = rowResults[i];
+    const cells = editCols().map(([n, field]) => cellState(row, n)[field].trim());
+    if (res && !res.error) { const f = shown(res.main).f; cells.push(rounded(f), roundedSigma(f)); }
+    return cells.join('\t');
+  }
   function exportCsv() {
     const good = goodRows();
     const first = good.length ? good[0].r.main : null;
@@ -1408,7 +1447,6 @@
     });
     header.push(name + ru, name + ' uncertainty' + ru, name + ' (rounded)', name + ' uncertainty (rounded)', 'relative uncertainty (%)', 'Monte Carlo check', 'notes');
     const rows = [header];
-    const rounded = (f) => (f.sci ? f.value + 'e' + f.exp : f.value);
     rowResults.forEach((res, i) => {
       if (!res) return;
       const row = state.table.rows[i], get = rowGetter(row);
@@ -1421,7 +1459,7 @@
         line.push('', '', '', '', '', '', res.error);
       } else {
         const r = res.main, sh = shown(r);
-        line.push(sh.value, sh.sigma, rounded(sh.f), sh.f.sigma == null ? '' : sh.f.sigma, r.sigma > 0 ? r.relative * 100 : 0,
+        line.push(sh.value, sh.sigma, rounded(sh.f), roundedSigma(sh.f), r.sigma > 0 ? r.relative * 100 : 0,
           res.mc ? (res.mc.c.ok ? 'passed' : 'warning: ' + mcProblems(res.mc.c, res.lin).join('; ')) : '',
           [...(r.warnings || [])].join(' '));
       }
