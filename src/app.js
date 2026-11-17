@@ -1202,14 +1202,14 @@
     lastFit = null;
     const g = graphState();
     const pts = [], left = [];
-    let xu = '', yu = '';
+    let xu = '', yu = '', xHasErr = 0;
     if (xyMode()) rowResults.forEach((r, i) => { if (r && r.error) left.push(`row ${i + 1} (${r.error})`); });
     goodRows().forEach(({ r: res, i }) => {
       const ax = axisValue(g.x, g.xExpr, res, i), ay = axisValue(g.y, g.yExpr, res, i);
       const why = ax.error || ay.error;
       if (why) return left.push(`row ${i + 1} (${why})`);
       if (!isFinite(ax.v) || !isFinite(ay.v)) return left.push(`row ${i + 1} (not a number)`);
-      if (!(ay.s > 0)) return left.push(`row ${i + 1} (y uncertainty is 0)`);
+      if (!(ay.s > 0)) { if (ax.s > 0) xHasErr++; return left.push(`row ${i + 1} (y uncertainty is 0)`); }
       xu = xu || ax.unit; yu = yu || ay.unit;
       pts.push({ x: ax.v, y: ay.v, sx: ax.s || 0, sy: ay.s, row: i + 1 });
     });
@@ -1226,9 +1226,21 @@
         { sx: pts.map((p) => p.sx), useXErrors: g.xErrors, origin: g.origin });
     } catch (e) {
       const noYErr = !pts.length && left.some((l) => l.includes('y uncertainty is 0'));
+      // The uncertainties are on the x axis instead: offer to swap the axes round.
+      let swap = null;
+      if (noYErr && xHasErr) {
+        swap = el('button', { type: 'button', class: 'small primary' }, 'Swap axes');
+        swap.addEventListener('click', () => {
+          [g.x, g.y] = [g.y, g.x];
+          [g.xExpr, g.yExpr] = [g.yExpr, g.xExpr];
+          update();
+        });
+      }
       return out.replaceChildren(el('p', { class: 'msg' }, noYErr
-        ? 'Give the y readings an uncertainty (in the y row above the table). The fit weights each point by 1/σ_y², so it can’t use points without one.'
-        : e.message), leftNote || '');
+        ? (swap
+          ? `The fit needs uncertainties on the y axis, but yours are on the x axis (${xt.plain}). Swap the axes to put ${xt.plain} on y.`
+          : 'Give the y readings an uncertainty (in the y row above the table). The fit weights each point by 1/σ_y², so it can’t use points without one.')
+        : e.message), swap || '', swap ? '' : leftNote || '');
     }
 
     const spec = { points: pts, fit, residuals: fit.residuals, rsig: fit.sigmaUsed, ariaLabel: `Graph of ${yt.plain} against ${xt.plain} with fitted line` };
