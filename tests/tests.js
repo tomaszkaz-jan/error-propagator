@@ -182,6 +182,13 @@
     if (!r.warnings.some((w) => w.includes('more than once'))) throw new Error('no warning');
   });
   test('rules: functions use slope', () => near(rules('ln(x)', [v('x', 10, 0.5)]).sigma, 0.05));
+  // Names with an underscore (R_1) used to break math.derivative, which only takes plain-letter strings.
+  test('underscore names: G = R_1/R_2 (partial derivatives and simple rules)', () => {
+    const vars = [v('R_1', 10000, 100), v('R_2', 30000, 1500)];
+    near(calc('G = R_1/R_2', vars).sigma, (1 / 3) * Math.hypot(0.01, 0.05));
+    near(rules('G = R_1/R_2', vars).sigma, (1 / 3) * (0.01 + 0.05));
+    near(calc('sin(theta_0)', [v('theta_0', 0.5, 0.01)]).sigma, Math.cos(0.5) * 0.01);
+  });
 
   // ----- Max-min -----
   const mm = (eq, vars, opts) => EP.maxMin(eq, vars, opts);

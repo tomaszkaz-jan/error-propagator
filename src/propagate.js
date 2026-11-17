@@ -148,7 +148,7 @@
     if (!p.derivs.has(n)) {
       let d;
       try {
-        d = math.derivative(p.node, n);
+        d = math.derivative(p.node, new math.SymbolNode(n)); // a plain string fails for names with _ (e.g. R_1)
       } catch (err) {
         throw new InputError("Couldn't differentiate with respect to " + n + ': ' + err.message);
       }
@@ -518,7 +518,7 @@
       args.forEach((a, k) => {
         if (!(a.d > 0)) return;
         let slope;
-        try { slope = toReal(math.derivative(op, 'u' + k).evaluate(sc), ''); } catch (e) { slope = NaN; }
+        try { slope = toReal(math.derivative(op, new math.SymbolNode('u' + k)).evaluate(sc), ''); } catch (e) { slope = NaN; }
         if (!isFinite(slope)) warnings.push('The slope of "' + n.toString() + '" is infinite or undefined here, so the simple rules break down.');
         d += Math.abs(slope) * a.d;
       });
