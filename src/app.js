@@ -71,7 +71,8 @@
     const xy = t.xy && typeof t.xy === 'object' ? t.xy : {};
     let xn = xyName(xy.x) ? xy.x : 'x', yn = xyName(xy.y) ? xy.y : 'y';
     if (xn === yn) { xn = 'x'; yn = 'y'; }
-    out.table.xy = { on: !!xy.on, x: xn, y: yn };
+    // Optional free-text labels ("Log gain") shown instead of the variable names.
+    out.table.xy = { on: !!xy.on, x: xn, y: yn, xLabel: str(xy.xLabel, 40), yLabel: str(xy.yLabel, 40) };
     out.table.xyGraph = cleanGraph(t.xyGraph);
     return out;
   }
@@ -158,6 +159,15 @@
   const activeGraph = () => (xyMode() ? state.table.xyGraph : state.table.graph);
   // "Same value in every row" only applies with an equation; x-y columns are always read per row.
   const isFixed = (n) => !xyMode() && colState(n).fixed;
+  // x-y mode: a column's typed label (plain text) if it has one, else its variable name.
+  const xyLabel = (n) => {
+    const xy = state.table.xy;
+    if (!xyMode()) return '';
+    return n === xy.x ? xy.xLabel : n === xy.y ? xy.yLabel : '';
+  };
+  const texText = (t) => '\\text{' + t.replace(/[\\{}$&#^_%~]/g, (c) => (c === '\\' ? '\\textbackslash{}' : c === '^' ? '\\textasciicircum{}' : c === '~' ? '\\textasciitilde{}' : '\\' + c)) + '}';
+  const colTex = (n) => (xyLabel(n) ? texText(xyLabel(n)) : N(n));
+  const colPlain = (n) => xyLabel(n) || n;
   const cellState = (row, n) => (row[n] = row[n] || { value: '', unc: '' });
   const blank = (s) => String(s == null ? '' : s).trim() === '';
   const engineOpts = () => ({ degrees: state.degrees, resultUnit: state.resultUnit });
@@ -732,7 +742,7 @@
         // x-y mode: the column names are typed here (they label the graph axes).
         const which = ni ? 'y' : 'x';
         label = el('label', { class: 'xy-name' }, el('span', { class: 'axis-tag' }, which),
-          el('input', { type: 'text', class: 'mono col-name', value: n, 'aria-label': `Name of the ${which} column`, title: 'Rename this column (it labels the graph axis)', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', 'data-axis': which }));
+          el('input', { type: 'text', class: 'mono col-name', value: colPlain(n), 'aria-label': `Name of the ${which} column`, title: 'Rename this column (it labels the graph axis)', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', 'data-axis': which }));
         label.querySelector('input').addEventListener('change', (e) => renameXy(which, e.target));
       }
       config.append(el('div', { class: 'cfg-row' + (fixedHere ? ' is-fixed' : '') },
@@ -749,7 +759,7 @@
       }
     });
     tableBox.append(el('p', { class: 'hint first' }, xyMode()
-      ? 'Name each column, then give its uncertainty and unit. The fit needs a y uncertainty: tick the box if it differs in each row.'
+      ? 'Name each column (any text, e.g. Log gain), then give its uncertainty and unit. The fit needs a y uncertainty: tick the box if it differs in each row.'
       : 'Uncertainty and unit of each variable. Tick a box if the uncertainty differs in each row, or if the value is the same in every row.'), config);
     if (chips.children.length) tableBox.append(chips);
 
@@ -757,7 +767,7 @@
     const cols = editCols();
     const unitOf = (n) => (blank(colState(n).unit) ? '' : '\\ (' + EP.unitTex(colState(n).unit.trim()) + ')');
     const head = el('tr', null, el('th', { class: 'rownum' }, '#'),
-      cols.map(([n, field]) => el('th', null, tex((field === 'unc' ? '\\sigma_{' + N(n) + '}' : N(n)) + unitOf(n)))),
+      cols.map(([n, field]) => el('th', null, tex((field === 'unc' ? '\\sigma_{' + colTex(n) + '}' : colTex(n)) + unitOf(n)))),
       xyMode() ? null : el('th', { class: 'res-col' }, el('span', { class: 'res-head' }, tex(N(resultName())))),
       xyMode() ? null : el('th', { title: 'Monte Carlo check' }, 'check'), el('th'));
     const body = el('tbody');
@@ -813,25 +823,30 @@
       el('span', { class: 'hint' }, 'Tip: copy cells from Excel and paste them into any cell. Enter and the arrow keys move between cells.')));
   }
 
-  // x-y mode: rename a column, carrying its readings and settings across.
+  // x-y mode: rename a column, carrying its readings and settings across. Any text is fine:
+  // "V" or "theta_0" become the variable name; "Log gain" is kept as a label, with the
+  // variable name Log_gain (used in axis expressions such as ln(Log_gain)).
   function renameXy(which, input) {
     const xy = state.table.xy, from = xy[which], other = xy[which === 'x' ? 'y' : 'x'];
-    const to = input.value.trim();
-    if (to === from) { input.value = from; return; }
-    if (!xyName(to) || to === other) {
-      input.classList.add('invalid');
-      input.title = to === other ? 'The two columns need different names.' : 'Use letters, digits and _ (starting with a letter), e.g. V, I, T_2. Not pi or e.';
-      return;
+    const text = input.value.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!text) { input.value = colPlain(from); return; }
+    let to = text;
+    if (!xyName(text)) {
+      to = text.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 36);
+      if (!/^[A-Za-z]/.test(to)) to = which + (to ? '_' + to : '');
+      if (to === 'pi' || to === 'e') to += '_';
     }
-    if (state.table.cols[from]) state.table.cols[to] = state.table.cols[from];
-    state.table.rows.forEach((row) => { if (row[from]) { row[to] = row[from]; delete row[from]; } });
-    const g = state.table.xyGraph;
-    ['x', 'y'].forEach((a) => { if (g[a] === 'var:' + from) g[a] = 'var:' + to; });
-    xy[which] = to;
+    if (to === other) to = (to + '_2').slice(0, 40);
+    if (to !== from) {
+      if (state.table.cols[from]) state.table.cols[to] = state.table.cols[from];
+      state.table.rows.forEach((row) => { if (row[from]) { row[to] = row[from]; delete row[from]; } });
+      const g = state.table.xyGraph;
+      ['x', 'y'].forEach((a) => { if (g[a] === 'var:' + from) g[a] = 'var:' + to; });
+      xy[which] = to;
+    }
+    xy[which + 'Label'] = text === to ? '' : text;
     builtFor = '';
     update();
-    const again = tableBox.querySelector(`input.col-name[data-axis="${which}"]`);
-    if (again) again.blur();
   }
 
   // After a rebuild, put the cursor back in the unit box being typed in.
@@ -954,7 +969,7 @@
       if (names.every((n) => blank(cellState(row, n).value))) return null;
       const read = readVars(rowGetter(row));
       if (read.error) return { error: read.error };
-      if (read.missing) return { error: 'missing ' + read.missing.join(', '), missing: true };
+      if (read.missing) return { error: 'missing ' + read.missing.map((m) => m.replace(/^(uncertainty of )?(.*)$/, (a, u, n) => (u || '') + colPlain(n))).join(', '), missing: true };
       return { vars: read.vars };
     });
     if (!goodRows().length) {
@@ -1063,7 +1078,7 @@
   function axisOptions(selected) {
     const s = el('select', null,
       xyMode() ? null : el('option', { value: 'result' }, resultName() + ' (the result)'),
-      names.map((n) => el('option', { value: 'var:' + n }, n)),
+      names.map((n) => el('option', { value: 'var:' + n }, colPlain(n))),
       el('option', { value: 'custom' }, 'expression'));
     s.value = selected;
     return s;
@@ -1147,7 +1162,7 @@
   function axisTitle(which, expr, unit) {
     let t, p;
     if (which === 'result') { t = N(resultName()); p = resultName(); }
-    else if (which.startsWith('var:')) { t = N(which.slice(4)); p = which.slice(4); }
+    else if (which.startsWith('var:')) { t = colTex(which.slice(4)); p = colPlain(which.slice(4)); }
     else {
       p = expr.trim();
       try {

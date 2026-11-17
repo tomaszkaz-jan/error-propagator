@@ -155,7 +155,7 @@ h1 { margin: 0; font-size: 1.5rem; line-height: 1.1; font-weight: 650; letter-sp
 .table-kind[hidden] { display: none; }
 .xy-name { display: inline-flex; align-items: center; gap: 6px; }
 .xy-name .axis-tag { font-size: 0.8rem; color: var(--muted); font-family: var(--mono); }
-.cfg-row input.col-name[type="text"] { width: 72px; font-weight: 600; }
+.cfg-row input.col-name[type="text"] { width: 130px; font-weight: 600; }
 .rownum-plain { display: inline-block; padding: 0 8px; font-size: 0.8rem; color: var(--muted); font-family: var(--mono); }
 
 /* ---------- cards and text ---------- */
