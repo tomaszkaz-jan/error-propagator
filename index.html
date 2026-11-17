@@ -55,7 +55,15 @@
       <button type="button" data-mode="table">Table of readings</button>
     </div>
 
-    <section class="card" aria-labelledby="eq-label">
+    <div class="table-kind" id="table-kind" hidden>
+      <span class="opt-label" id="kind-label">Readings go into</span>
+      <div class="seg" role="group" aria-labelledby="kind-label">
+        <button type="button" data-kind="eq">An equation</button>
+        <button type="button" data-kind="xy">Just x and y, for a fit</button>
+      </div>
+    </div>
+
+    <section class="card" id="eq-card" aria-labelledby="eq-label">
       <label for="eq" class="label" id="eq-label">Equation</label>
       <div class="eq-row">
         <input id="eq" class="mono" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"

@@ -19,6 +19,9 @@
   const str = (v, max) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max || 200);
   const newId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+  // A column name for x-y mode: a plain variable name, but not the constants pi or e.
+  const xyName = (k) => typeof k === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) && k !== 'pi' && k !== 'e';
+
   // Only known fields with the right types survive (also used for restored backup files).
   function cleanData(d) {
     d = d && typeof d === 'object' ? d : {};
@@ -53,14 +56,23 @@
     while (out.table.rows.length < START_ROWS) out.table.rows.push({});
     out.table.selected = Math.max(0, Math.min(Number(t.selected) || 0, out.table.rows.length - 1));
     out.table.tab = ['summary', 'graph', 'row'].includes(t.tab) ? t.tab : 'summary';
-    const gr = t.graph && typeof t.graph === 'object' ? t.graph : {};
     const axis = (a, def) => (typeof a === 'string' && /^(result|custom|var:[A-Za-z_][A-Za-z0-9_]{0,39})$/.test(a) ? a : def);
-    out.table.graph = {
-      x: axis(gr.x, ''), y: axis(gr.y, ''),
-      derived: str(gr.derived, 300), derivedAccepted: str(gr.derivedAccepted, 60),
-      xExpr: str(gr.xExpr, 200), yExpr: str(gr.yExpr, 200),
-      xErrors: !!gr.xErrors, origin: !!gr.origin, title: str(gr.title, 120),
+    const cleanGraph = (gr) => {
+      gr = gr && typeof gr === 'object' ? gr : {};
+      return {
+        x: axis(gr.x, ''), y: axis(gr.y, ''),
+        derived: str(gr.derived, 300), derivedAccepted: str(gr.derivedAccepted, 60),
+        xExpr: str(gr.xExpr, 200), yExpr: str(gr.yExpr, 200),
+        xErrors: !!gr.xErrors, origin: !!gr.origin, title: str(gr.title, 120),
+      };
     };
+    out.table.graph = cleanGraph(t.graph);
+    // "Just x and y": two columns straight into the fit, no equation. It has its own graph settings.
+    const xy = t.xy && typeof t.xy === 'object' ? t.xy : {};
+    let xn = xyName(xy.x) ? xy.x : 'x', yn = xyName(xy.y) ? xy.y : 'y';
+    if (xn === yn) { xn = 'x'; yn = 'y'; }
+    out.table.xy = { on: !!xy.on, x: xn, y: yn };
+    out.table.xyGraph = cleanGraph(t.xyGraph);
     return out;
   }
 
@@ -142,6 +154,10 @@
   const fmt = (v, s) => EP.formatResult(v, s, roundMode());
   const varState = (n) => (state.vars[n] = state.vars[n] || { value: '', unc: '', type: 'abs', unit: '', reps: '', inst: '' });
   const colState = (n) => (state.table.cols[n] = state.table.cols[n] || { perRow: false, unc: '', type: 'abs', unit: '', fixed: false, value: '' });
+  const xyMode = () => state.mode === 'table' && state.table.xy.on;
+  const activeGraph = () => (xyMode() ? state.table.xyGraph : state.table.graph);
+  // "Same value in every row" only applies with an equation; x-y columns are always read per row.
+  const isFixed = (n) => !xyMode() && colState(n).fixed;
   const cellState = (row, n) => (row[n] = row[n] || { value: '', unc: '' });
   const blank = (s) => String(s == null ? '' : s).trim() === '';
   const engineOpts = () => ({ degrees: state.degrees, resultUnit: state.resultUnit });
@@ -232,6 +248,11 @@
     settingsSummary();
     token++;
     clearTimeout(detailTimer); clearTimeout(rowMcTimer);
+    if (xyMode()) {
+      names = [state.table.xy.x, state.table.xy.y];
+      rebuildInputs();
+      return updateTable();
+    }
     try {
       names = EP.listVariables(state.equation);
       preview.replaceChildren(tex(EP.equationTex(state.equation), true));
@@ -246,7 +267,7 @@
   }
 
   function rebuildInputs(force) {
-    const key = state.mode + '|' + names.join('|') + '|' +
+    const key = state.mode + (xyMode() ? '/xy' : '') + '|' + names.join('|') + '|' +
       (state.mode === 'table' ? names.map((n) => colState(n).perRow + '/' + colState(n).fixed).join(',') + '|' + state.table.rows.length : '');
     if (key === builtFor && !force) return;
     builtFor = key;
@@ -652,7 +673,7 @@
   // ================= table mode =================
 
   // Editable columns in order (used for paste and Enter-to-move-down).
-  const editCols = () => names.filter((n) => !colState(n).fixed).flatMap((n) => (colState(n).perRow ? [[n, 'value'], [n, 'unc']] : [[n, 'value']]));
+  const editCols = () => names.filter((n) => !isFixed(n)).flatMap((n) => (colState(n).perRow ? [[n, 'value'], [n, 'unc']] : [[n, 'value']]));
 
   function renderTable() {
     tableBox.replaceChildren();
@@ -664,8 +685,9 @@
     // Uncertainty, unit and (optionally) one fixed value per variable
     const config = el('div', { class: 'col-config' });
     const chips = el('div', { class: 'chips' });
-    names.forEach((n) => {
+    names.forEach((n, ni) => {
       const c = colState(n);
+      const fixedHere = isFixed(n);
       const numAttrs = { type: 'text', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off' };
       const unc = el('input', Object.assign({ class: 'u-all', placeholder: 'uncertainty', 'aria-label': n + ' uncertainty for all rows', disabled: c.perRow }, numAttrs));
       unc.value = c.perRow ? '' : c.unc;
@@ -676,7 +698,7 @@
       const unit = unitInput(c.unit, n + ' unit', (u) => { c.unit = u; builtFor = ''; update(); refocus('.cfg-row', n); });
       unit.dataset.var = n;
       let fval = null;
-      if (c.fixed) {
+      if (fixedHere) {
         fval = el('input', Object.assign({ class: 'fixed-value', placeholder: 'value', 'aria-label': n + ' value for every row' }, numAttrs));
         fval.value = c.value;
         mark(fval);
@@ -705,20 +727,30 @@
         builtFor = '';
         update();
       });
-      config.append(el('div', { class: 'cfg-row' + (c.fixed ? ' is-fixed' : '') },
-        tex(N(n), false, 'var-name'), fval,
+      let label = tex(N(n), false, 'var-name');
+      if (xyMode()) {
+        // x-y mode: the column names are typed here (they label the graph axes).
+        const which = ni ? 'y' : 'x';
+        label = el('label', { class: 'xy-name' }, el('span', { class: 'axis-tag' }, which),
+          el('input', { type: 'text', class: 'mono col-name', value: n, 'aria-label': `Name of the ${which} column`, title: 'Rename this column (it labels the graph axis)', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', 'data-axis': which }));
+        label.querySelector('input').addEventListener('change', (e) => renameXy(which, e.target));
+      }
+      config.append(el('div', { class: 'cfg-row' + (fixedHere ? ' is-fixed' : '') },
+        label, fval,
         el('span', { class: 'pm' }, '±'), unc, type, unit,
         el('div', { class: 'cfg-extra' },
-          c.fixed ? null : el('label', { class: 'per-row' }, per, ' uncertainty differs in each row'),
-          el('label', { class: 'per-row' }, fixed, ' same value in every row'))));
-      if (EP.PHYSICAL_CONSTANTS[n] && !c.fixed && state.table.rows.every((row) => !row[n] || blank(row[n].value))) {
+          fixedHere ? null : el('label', { class: 'per-row' }, per, ' uncertainty differs in each row'),
+          xyMode() ? null : el('label', { class: 'per-row' }, fixed, ' same value in every row'))));
+      if (!xyMode() && EP.PHYSICAL_CONSTANTS[n] && !c.fixed && state.table.rows.every((row) => !row[n] || blank(row[n].value))) {
         chips.append(constantChip(n, ', in every row', (k) => {
           Object.assign(c, { fixed: true, perRow: false, value: String(k.value), unc: String(k.unc), type: 'abs', unit: k.unit });
           builtFor = ''; update();
         }));
       }
     });
-    tableBox.append(el('p', { class: 'hint first' }, 'Uncertainty and unit of each variable. Tick a box if the uncertainty differs in each row, or if the value is the same in every row.'), config);
+    tableBox.append(el('p', { class: 'hint first' }, xyMode()
+      ? 'Name each column, then give its uncertainty and unit. The fit needs a y uncertainty: tick the box if it differs in each row.'
+      : 'Uncertainty and unit of each variable. Tick a box if the uncertainty differs in each row, or if the value is the same in every row.'), config);
     if (chips.children.length) tableBox.append(chips);
 
     // The grid
@@ -726,12 +758,15 @@
     const unitOf = (n) => (blank(colState(n).unit) ? '' : '\\ (' + EP.unitTex(colState(n).unit.trim()) + ')');
     const head = el('tr', null, el('th', { class: 'rownum' }, '#'),
       cols.map(([n, field]) => el('th', null, tex((field === 'unc' ? '\\sigma_{' + N(n) + '}' : N(n)) + unitOf(n)))),
-      el('th', { class: 'res-col' }, el('span', { class: 'res-head' }, tex(N(resultName())))), el('th', { title: 'Monte Carlo check' }, 'check'), el('th'));
+      xyMode() ? null : el('th', { class: 'res-col' }, el('span', { class: 'res-head' }, tex(N(resultName())))),
+      xyMode() ? null : el('th', { title: 'Monte Carlo check' }, 'check'), el('th'));
     const body = el('tbody');
     state.table.rows.forEach((row, r) => {
       const tr = el('tr', { class: r === state.table.selected ? 'sel' : '' });
-      const numBtn = el('button', { type: 'button', class: 'rownum-btn', title: 'Show the working for this row' }, String(r + 1));
-      numBtn.addEventListener('click', () => selectRow(r));
+      // With an equation, the row number opens that row's working; x-y rows have no working.
+      const numBtn = xyMode() ? el('span', { class: 'rownum-plain' }, String(r + 1))
+        : el('button', { type: 'button', class: 'rownum-btn', title: 'Show the working for this row' }, String(r + 1));
+      if (!xyMode()) numBtn.addEventListener('click', () => selectRow(r));
       tr.append(el('td', { class: 'rownum' }, numBtn));
       cols.forEach(([n, field], c) => {
         const cell = cellState(row, n);
@@ -742,7 +777,7 @@
         input.addEventListener('focus', () => { if (state.table.selected !== r) selectRow(r, true); });
         tr.append(el('td', null, input));
       });
-      const res = el('td', { class: 'res' }), chk = el('td', { class: 'chk' });
+      const res = xyMode() ? null : el('td', { class: 'res' }), chk = xyMode() ? null : el('td', { class: 'chk' });
       const del = el('button', { type: 'button', class: 'del', title: 'Delete row ' + (r + 1), 'aria-label': 'Delete row ' + (r + 1) }, '×');
       del.addEventListener('click', () => {
         const before = JSON.stringify(state.table.rows), sel = state.table.selected;
@@ -754,7 +789,7 @@
         update();
         if (hadData) undoable(`Row ${r + 1} deleted.`, () => { state.table.rows = JSON.parse(before); state.table.selected = sel; builtFor = ''; update(); });
       });
-      tr.append(res, chk, el('td', null, del));
+      tr.append(...[res, chk].filter(Boolean), el('td', null, del));
       body.append(tr);
       rowCells.push({ tr, res, chk });
     });
@@ -776,6 +811,27 @@
     });
     tableBox.append(el('div', { class: 'table-actions' }, add, clear,
       el('span', { class: 'hint' }, 'Tip: copy cells from Excel and paste them into any cell. Enter and the arrow keys move between cells.')));
+  }
+
+  // x-y mode: rename a column, carrying its readings and settings across.
+  function renameXy(which, input) {
+    const xy = state.table.xy, from = xy[which], other = xy[which === 'x' ? 'y' : 'x'];
+    const to = input.value.trim();
+    if (to === from) { input.value = from; return; }
+    if (!xyName(to) || to === other) {
+      input.classList.add('invalid');
+      input.title = to === other ? 'The two columns need different names.' : 'Use letters, digits and _ (starting with a letter), e.g. V, I, T_2. Not pi or e.';
+      return;
+    }
+    if (state.table.cols[from]) state.table.cols[to] = state.table.cols[from];
+    state.table.rows.forEach((row) => { if (row[from]) { row[to] = row[from]; delete row[from]; } });
+    const g = state.table.xyGraph;
+    ['x', 'y'].forEach((a) => { if (g[a] === 'var:' + from) g[a] = 'var:' + to; });
+    xy[which] = to;
+    builtFor = '';
+    update();
+    const again = tableBox.querySelector(`input.col-name[data-axis="${which}"]`);
+    if (again) again.blur();
   }
 
   // After a rebuild, put the cursor back in the unit box being typed in.
@@ -855,15 +911,17 @@
   function rowGetter(row) {
     return (n) => {
       const c = colState(n), cell = cellState(row, n);
-      return { value: c.fixed ? c.value : cell.value, unc: c.perRow && !c.fixed ? cell.unc : c.unc, type: c.type, needUnc: c.perRow && !c.fixed, unit: c.unit };
+      const fixed = isFixed(n);
+      return { value: fixed ? c.value : cell.value, unc: c.perRow && !fixed ? cell.unc : c.unc, type: c.type, needUnc: c.perRow && !fixed, unit: c.unit };
     };
   }
 
   function updateTable() {
+    if (xyMode()) return updateXy();
     let units = null;
     rowResults = state.table.rows.map((row, r) => {
       const cells = rowCells[r];
-      const free = names.filter((n) => !colState(n).fixed);
+      const free = names.filter((n) => !isFixed(n));
       const empty = free.every((n) => blank(cellState(row, n).value));
       if (empty) { cells.res.replaceChildren(); cells.chk.replaceChildren(); return null; }
       const read = readVars(rowGetter(row));
@@ -888,6 +946,24 @@
     if (head) head.replaceChildren(tex(N(resultName()) + (units && units.display ? '\\ (' + units.tex + ')' : '')));
     renderSummary();
     scheduleRowChecks();
+  }
+
+  // x-y mode: each row is just its two readings; the result card is the fit.
+  function updateXy() {
+    rowResults = state.table.rows.map((row) => {
+      if (names.every((n) => blank(cellState(row, n).value))) return null;
+      const read = readVars(rowGetter(row));
+      if (read.error) return { error: read.error };
+      if (read.missing) return { error: 'missing ' + read.missing.join(', '), missing: true };
+      return { vars: read.vars };
+    });
+    if (!goodRows().length) {
+      return message(resultBox, rowResults.some((r) => r)
+        ? 'Finish a row (an x and a y) to see the fit.'
+        : 'Type your x and y readings in the table, or paste two columns from a spreadsheet. Give y an uncertainty: the fit weights each point by it.');
+    }
+    resultBox.replaceChildren(graphSection());
+    renderGraph();
   }
 
   function goodRows() {
@@ -966,9 +1042,9 @@
   let lastFit = null; // for the CSV export
 
   const graphState = () => {
-    const g = state.table.graph;
-    const free = names.filter((n) => !colState(n).fixed);
-    const ok = (a) => a === 'result' || a === 'custom' || (a.startsWith('var:') && names.includes(a.slice(4)));
+    const g = activeGraph();
+    const free = names.filter((n) => !isFixed(n));
+    const ok = (a) => (a === 'result' && !xyMode()) || a === 'custom' || (a.startsWith('var:') && names.includes(a.slice(4)));
     // Default to two measured columns: a result plotted against its own inputs is not independent data.
     if (!g.x || !ok(g.x)) g.x = free.length ? 'var:' + free[0] : 'result';
     if (!g.y || !ok(g.y)) g.y = free.length >= 2 ? 'var:' + free[1] : 'result';
@@ -986,7 +1062,7 @@
 
   function axisOptions(selected) {
     const s = el('select', null,
-      el('option', { value: 'result' }, resultName() + ' (the result)'),
+      xyMode() ? null : el('option', { value: 'result' }, resultName() + ' (the result)'),
       names.map((n) => el('option', { value: 'var:' + n }, n)),
       el('option', { value: 'custom' }, 'expression'));
     s.value = selected;
@@ -1093,6 +1169,7 @@
     const g = graphState();
     const pts = [], left = [];
     let xu = '', yu = '';
+    if (xyMode()) rowResults.forEach((r, i) => { if (r && r.error) left.push(`row ${i + 1} (${r.error})`); });
     goodRows().forEach(({ r: res, i }) => {
       const ax = axisValue(g.x, g.xExpr, res, i), ay = axisValue(g.y, g.yExpr, res, i);
       const why = ax.error || ay.error;
@@ -1114,7 +1191,10 @@
       fit = EP.linearFit(pts.map((p) => p.x), pts.map((p) => p.y), pts.map((p) => p.sy),
         { sx: pts.map((p) => p.sx), useXErrors: g.xErrors, origin: g.origin });
     } catch (e) {
-      return out.replaceChildren(el('p', { class: 'msg' }, e.message), leftNote || '');
+      const noYErr = !pts.length && left.some((l) => l.includes('y uncertainty is 0'));
+      return out.replaceChildren(el('p', { class: 'msg' }, noYErr
+        ? 'Give the y readings an uncertainty (in the y row above the table). The fit weights each point by 1/σ_y², so it can’t use points without one.'
+        : e.message), leftNote || '');
     }
 
     const spec = { points: pts, fit, residuals: fit.residuals, rsig: fit.sigmaUsed, ariaLabel: `Graph of ${yt.plain} against ${xt.plain} with fitted line` };
@@ -1163,7 +1243,7 @@
   function renderDerived(ctx) {
     const out = $('derived-out');
     if (!out) return;
-    const g = state.table.graph;
+    const g = activeGraph();
     if (lastFit) lastFit.derived = null;
     if (!ctx || blank(g.derived)) return out.replaceChildren();
     const { fit, slopeU, yUnits, hasUnits } = ctx;
@@ -1203,7 +1283,7 @@
   }
 
   function downloadGraph(spec, xt, yt, fm, fc, fit, btn, slopeU, yUnits) {
-    const g = state.table.graph;
+    const g = activeGraph();
     const txt = (w, u) => (u && u.display ? w.text.slice(0, w.text.length - u.display.length) + prettyUnit(u.display) : w.text);
     const info = [
       [fit.origin ? 'Fit: y = mx' : 'Fit: y = mx + c', 'χ² = ' + num(fit.chi2, 4)],
@@ -1224,7 +1304,7 @@
   const n12 = (x) => String(Number(x.toPrecision(12)));
 
   function pgfplots(pts, fit, xlabel, ylabel) {
-    const g = state.table.graph;
+    const g = activeGraph();
     const texEsc = (s) => s.replace(/[\\{}$&#^_%~]/g, (c) => '\\' + (c === '\\' ? 'textbackslash{}' : c === '^' ? '^{}' : c === '~' ? '~{}' : c));
     const xs = pts.map((p) => p.x);
     const lo = Math.min(...xs.map((x, i) => x - pts[i].sx)), hi = Math.max(...xs.map((x, i) => x + pts[i].sx));
@@ -1278,6 +1358,7 @@
   // Monte Carlo check per row (smaller sample, run in the background row by row).
   function scheduleRowChecks() {
     clearTimeout(rowMcTimer);
+    if (xyMode()) return;
     const t = token;
     const queue = goodRows().filter(({ r }) => r.lin.sigma > 0);
     const next = () => {
@@ -1555,6 +1636,17 @@
     $('single-card').hidden = m !== 'single';
     $('table-card').hidden = m !== 'table';
     if (m === 'table' && recalc) seedTable();
+    setKind(state.table.xy.on, false);
+    builtFor = '';
+    if (recalc) update();
+  }
+  // Table mode: readings go into the equation, or straight into an x-y fit.
+  function setKind(xy, recalc) {
+    state.table.xy.on = xy;
+    document.querySelectorAll('[data-kind]').forEach((b) => pressed(b, (b.dataset.kind === 'xy') === xy));
+    $('table-kind').hidden = state.mode !== 'table';
+    $('eq-card').hidden = xyMode();
+    $('table-label').textContent = xyMode() ? 'Readings (x and y)' : 'Readings';
     builtFor = '';
     if (recalc) update();
   }
@@ -1592,6 +1684,8 @@
     b.addEventListener('click', () => setMethod(b.dataset.method, true)));
   document.querySelectorAll('[data-mode]').forEach((b) =>
     b.addEventListener('click', () => setMode(b.dataset.mode, true)));
+  document.querySelectorAll('[data-kind]').forEach((b) =>
+    b.addEventListener('click', () => setKind(b.dataset.kind === 'xy', true)));
   roundSel.addEventListener('change', () => { state.rounding = roundSel.value; update(); });
   resultUnitInput.addEventListener('input', () => { state.resultUnit = resultUnitInput.value; markUnit(resultUnitInput); update(); });
   eqInput.addEventListener('input', () => { state.equation = eqInput.value; builtFor = ''; update(); });

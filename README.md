@@ -29,6 +29,8 @@ It gives:
 - a plain-English verdict on the fit
 - a residuals plot
 
+No equation needed: in table mode choose **Readings go into: Just x and y, for a fit**. You get two columns (named `x` and `y`, rename them to e.g. `I` and `V` for the axis labels), each with its own uncertainty and unit, and the readings go straight into the fit.
+
 Two optional extras that LSFR doesn't have: include x error bars in the fit (effective variance), and fit a line through the origin.
 
 You can export the graph as a high-resolution PNG (laid out like LSFR's figure), copy it as LaTeX (pgfplots), or copy the fit results as LaTeX. The fit is also included in the CSV.

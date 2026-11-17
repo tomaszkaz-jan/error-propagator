@@ -151,6 +151,12 @@ h1 { margin: 0; font-size: 1.5rem; line-height: 1.1; font-weight: 650; letter-sp
 .session-note.bad { color: var(--bad); }
 
 .mode-switch { margin-bottom: 16px; }
+.table-kind { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -4px 0 16px; }
+.table-kind[hidden] { display: none; }
+.xy-name { display: inline-flex; align-items: center; gap: 6px; }
+.xy-name .axis-tag { font-size: 0.8rem; color: var(--muted); font-family: var(--mono); }
+.cfg-row input.col-name[type="text"] { width: 72px; font-weight: 600; }
+.rownum-plain { display: inline-block; padding: 0 8px; font-size: 0.8rem; color: var(--muted); font-family: var(--mono); }
 
 /* ---------- cards and text ---------- */
 .card {
